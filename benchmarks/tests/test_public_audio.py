@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("prepare_audio", ROOT / "prepare_audio.py")
 audio = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(audio)
-with patch.dict(sys.modules, {"prepare_audio": audio}):
+with patch.dict(sys.modules, {"prepare_audio": audio}), patch.object(sys, "path", [str(ROOT), *sys.path]):
     spec = importlib.util.spec_from_file_location("run_all", ROOT / "run_all.py")
     run_all = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(run_all)
@@ -86,7 +86,7 @@ class PublicAudioTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             (root / "artifacts").mkdir()
-            (root / "artifacts/models.json").write_text("{}")
+            (root / "artifacts/models.json").write_text('{"asr_base": {"path": "fake"}}')
             output = root / "results"
 
             def execute(command, check):
@@ -105,7 +105,7 @@ class PublicAudioTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             (root / "artifacts").mkdir()
-            (root / "artifacts/models.json").write_text("{}")
+            (root / "artifacts/models.json").write_text('{"asr_base": {"path": "fake"}}')
             with patch.object(run_all, "ROOT", root), patch.object(run_all, "prepare") as prepare, patch.object(sys, "argv", ["run_all.py", "--output", str(root)]):
                 with self.assertRaises(SystemExit):
                     run_all.main()

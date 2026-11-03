@@ -1,0 +1,22 @@
+[
+  {"id":"ich_ach","german":"Ich möchte ein Buch über Chemie kaufen, aber auch eine Geschichte über München lesen.","focus":"ich/ach sounds and ch variants"},
+  {"id":"sibilants","german":"Sie saß draußen und sah, wie sechs süße Katzen leise durch die Straße liefen.","focus":"s, ss, ß, z and sch"},
+  {"id":"vowels","german":"Die Mütter mögen müde Schüler, schöne Bücher und fünf grüne Stühle.","focus":"ü/ö vowels and vowel length"},
+  {"id":"minimal_pairs","german":"Ich kenne den Staat und die Stadt. Wir bieten Betten und bitten um Ruhe. Die Hütte steht neben dem Hügel.","focus":"long and short vowels; final consonants"},
+  {"id":"consonant_clusters","german":"Selbstverständlich spricht der Sportlehrer besonders deutlich über schwierige Sprachübungen.","focus":"consonant clusters and word stress"},
+  {"id":"separable_verbs","german":"Ich stehe früh auf, rufe meine Schwester an und kaufe danach im Supermarkt ein.","focus":"sentence rhythm and separated verb particles"},
+  {"id":"subordinate_long","german":"Wenn ich gewusst hätte, dass der Zug ausfällt, wäre ich früher losgefahren, damit ich den Termin trotzdem rechtzeitig erreiche.","focus":"complex clause pauses and intonation"},
+  {"id":"question_contrast","german":"Du kommst morgen? Wann kommst du morgen? Komm bitte morgen!", "focus":"question, statement and imperative intonation"},
+  {"id":"dialogue","german":"„Entschuldigung, ist dieser Platz noch frei?“ — „Ja, natürlich. Setzen Sie sich bitte.“", "focus":"quoted dialogue and punctuation"},
+  {"id":"dates_digits","german":"Der nächste Termin ist am 03.11.2026 um 14:30 Uhr. Bitte kommen Sie zehn Minuten früher.","focus":"dates and clock times written as digits"},
+  {"id":"money","german":"Das Brot kostet 3,50 Euro. Für zwei Brote bezahle ich 7 Euro und bekomme 13 Euro zurück.","focus":"decimal comma and money"},
+  {"id":"measurements","german":"Der Zug fährt 120 km/h. Die Strecke ist 35 km lang, und draußen sind es minus 5 °C.","focus":"units, symbols and negative temperature"},
+  {"id":"abbreviations","german":"Dr. Müller wohnt z. B. in der Bahnhofstraße. Die Besprechung beginnt um ca. 9 Uhr.","focus":"common abbreviations without inappropriate pauses"},
+  {"id":"proper_names","german":"Frau Schröder fährt von Düsseldorf über Köln nach Aachen und besucht anschließend die Schweiz.","focus":"German names and place names"},
+  {"id":"compound_words","german":"Die Krankenversicherung übernimmt die Kosten für die Untersuchung im Universitätskrankenhaus.","focus":"long compounds and stress"},
+  {"id":"loanwords","german":"Ich habe das Update heruntergeladen, eine E-Mail geschrieben und ein Ticket für das Konzert bestellt.","focus":"common loanwords in German sentences"},
+  {"id":"negation_contrast","german":"Ich habe nicht gesagt, dass du das machen musst. Ich habe gesagt, dass du es machen kannst.","focus":"contrastive phrasing and negation"},
+  {"id":"parentheses","german":"Mein Bruder — er wohnt seit drei Jahren in Berlin — besucht uns am Wochenende (wenn sein Zug pünktlich ist).", "focus":"dashes, parentheses and pauses"},
+  {"id":"directions","german":"Gehen Sie geradeaus, biegen Sie an der zweiten Kreuzung links ab und nehmen Sie danach die erste Straße rechts.","focus":"clear instructions and ordered phrases"},
+  {"id":"paragraph","german":"Heute Morgen bin ich mit dem Fahrrad zur Arbeit gefahren. Unterwegs hat es plötzlich angefangen zu regnen, deshalb habe ich kurz an einer Haltestelle gewartet. Als der Regen nachließ, konnte ich weiterfahren. Trotz der kleinen Verspätung war ich rechtzeitig zur Besprechung da. Nach der Arbeit möchte ich noch einkaufen und anschließend mit meiner Familie zu Abend essen.","focus":"paragraph continuity, pauses, omissions and naturalness"}
+]

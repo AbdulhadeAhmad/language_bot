@@ -2,6 +2,54 @@
 
 This is an isolated experiment, not the bot implementation. Candidates are **not approved production choices**. Run on the planned Linux server (4 cores, 16 GB RAM, approximately 400 GB SSD). Waiting for inference is acceptable; the future bot must use a separate worker.
 
+## Round two: repair ASR and compare more TTS candidates
+
+The first server run established low translation/TTS memory use, but ASR failed during decoding. The main lock now pins **PyAV 18.1.0** (`av<19`) to avoid the keyword incompatibility with faster-whisper 1.2.1. See [upstream issue](https://github.com/SYSTRAN/faster-whisper/issues/1589). Update the code on the server, then synchronize the changed lock and rerun only ASR:
+
+```bash
+uv sync --project benchmarks --python python3.12 --locked
+uv run --project benchmarks --no-sync python benchmarks/run_all.py --only asr
+```
+
+This reuses the human speech and downloaded ASR models. Reports now include the installed PyAV version and normalized word error rates alongside the raw transcripts. WER ignores case/punctuation; it is not a substitute for reviewing meaning. The existing long reference has a suspicious trailing `x`, so do not interpret tiny score differences as decisive without checking the reference.
+
+For the larger TTS test, prepare a **separate** Qwen environment and download only the missing candidate models on the server:
+
+```bash
+uv sync --project benchmarks/qwen --python python3.12 --locked
+uv run --project benchmarks --no-sync python benchmarks/prepare.py --extended-tts --qwen
+uv run --project benchmarks --no-sync python benchmarks/run_all.py \
+  --only tts --suite extended --runs 2 --timeout 7200 \
+  --qwen-python benchmarks/qwen/.venv/bin/python
+```
+
+Candidate comparison:
+
+- Piper: Thorsten medium, Thorsten high, Eva x-low, Karlsson low, Kerstin low, and Ramona low. Thorsten medium/high are variants of the **same speaker**; final selection still needs three distinct voices.
+- Qwen3-TTS 12Hz **0.6B CustomVoice**: Ryan, Aiden, and Serena speaking German. These speakers are natively English/Chinese according to the [Qwen documentation](https://github.com/QwenLM/Qwen3-TTS), so assess German pronunciation carefully. This uses preset voices, not voice cloning.
+- Qwen runs CPU-only with float32, eager attention, and no FlashAttention or CUDA dependency. Its environment isolates its Transformers requirement from the existing translation benchmark. The snapshot includes its speech tokenizer.
+- The extended corpus has **27 inputs**: the original six, twenty pronunciation/usage cases, and the unchanged 1,000-character stress case. Coverage includes ich/ach, umlauts, vowel length, clusters, numbers, dates, money, units, abbreviations, names, dialogue, and paragraphs.
+- With nine candidates and two repetitions, a complete run produces **486 WAVs**. A one-candidate-at-a-time process keeps peak memory attributable. Qwen may take hours across the full suite; `--timeout 7200` is a two-hour limit **per candidate**, not for the entire comparison.
+
+No models are selected automatically. Judge pronunciation, naturalness, completeness, speed, and resource use together. A heavier model can consume tolerable RAM and still be too slow on four CPU cores.
+
+The results directory contains:
+
+- `report.json` and `summary.md`, including warning counts and installed package versions.
+- `review.html`: an offline listening page with relative WAV links, grouped by sentence. Copy the **whole results directory** back to your computer and open this file locally.
+- `listening_scores.csv`: score pronunciation/naturalness from 1–5, mark completeness, and note errors. Missing-phoneme warnings are reported rather than silently dismissed.
+- Per-candidate `progress.json` checkpoints and live `stderr.log` files. Completed measurements survive a timeout; a timed-out candidate still fails. You can inspect these while a long run is in progress.
+
+To repeat only one candidate, use `--candidates`, for example:
+
+```bash
+uv run --project benchmarks --no-sync python benchmarks/run_all.py \
+  --only tts --candidates qwen_0_6b_ryan --suite basic --runs 2 --timeout 7200 \
+  --qwen-python benchmarks/qwen/.venv/bin/python
+```
+
+The Qwen adapter/protocol and orchestration are covered by offline tests, but actual Qwen inference, memory, and package installation still require the server run. Local dependency-lock checks do not establish model feasibility. The 2,048-token generation ceiling is recorded; listening review must check complete delivery, especially on the long sample.
+
 ## Candidates and compatibility
 
 - ASR: faster-whisper `base` and `small`, CPU INT8, beam size 5. [Upstream](https://github.com/SYSTRAN/faster-whisper) documents CPU quantization and lazy transcription; the benchmark consumes all segments inside the measured interval.
@@ -31,7 +79,7 @@ If you already installed dependencies and ran `prepare.py`, do not repeat those 
 uv run --project benchmarks --no-sync python benchmarks/run_all.py
 ```
 
-This reuses `artifacts/models.json`, prepares or verifies the public German audio automatically, runs all six model candidates, and prints the results directory. No recordings, transcripts, manifest editing, new packages, or account are required. Results get a new timestamped directory on each run. The default is four CPUs, three repetitions, and a one-hour timeout per candidate.
+For the original six-candidate manifest, this reuses `artifacts/models.json`, prepares or verifies public German audio automatically, runs the candidates, and prints the results directory. No recordings, transcripts, manual manifest editing, or account are required. Results get a new timestamped directory on each run. The default is four CPUs, three repetitions, and a one-hour timeout per candidate. After adding Qwen candidates, supply `--qwen-python` as shown above, or select an independent group such as `--only asr`.
 
 The ready-made audio is from [Google FLEURS](https://huggingface.co/datasets/google/fleurs), German (`de_de`) test split, licensed [CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/). The downloader streams the original archive at a resolved immutable revision, bypassing the dataset preview service. It selects six distinct human utterances with their provided transcripts, converts them to mono 16 kHz PCM WAV, and creates a two-minute stress sample from complete utterances with short gaps and trailing silence. No words are cut or invented. `attribution.json` records the source revision, utterances, hashes, license, and transformations.
 

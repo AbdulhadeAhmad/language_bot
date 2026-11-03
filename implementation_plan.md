@@ -9,7 +9,7 @@ Move each milestone through **Not started → In progress → Verification → D
 | Milestone | Status | Evidence / notes |
 |---|---|---|
 | M0 — Specification and tracking | Done | [30 acceptance scenarios](docs/acceptance_scenarios.md) cover ownership, duplicates, privacy, copying, editing, deletion, and review behavior; checked against the revised specification. |
-| M1 — Runtime and model feasibility | In progress | [Benchmark package and target-server runbook](benchmarks/README.md) prepared; isolated dependency lock generated. Owner reports server dependencies and models installed. Public German speech fixtures downloaded and validated; one-command runner supplied. Target-server measurements, license review, and owner quality acceptance are pending. |
+| M1 — Runtime and model feasibility | In progress | [First server-run findings](docs/benchmark_findings_20261103.md): translation and three TTS voices completed. PyAV incompatibility repaired in the lock; ASR rerun pending. [Round-two commands](benchmarks/README.md) compare six Piper variants and three Qwen3-TTS 0.6B speakers over 27 inputs. Quality, license review, and final selection remain pending. |
 | M2 — Async application foundation | Not started | |
 | M3 — Collections and duplicate warnings | Not started | |
 | M4 — Durable jobs and archive storage | Not started | |
@@ -343,6 +343,8 @@ Track each milestone as **Not started → In progress → Verification → Done*
 
 | 2026-11-03 | Supply public German human-speech fixtures and a one-command benchmark runner; user recordings and manual manifests are no longer prerequisites. | Owner requested a complete ready-to-run benchmark after installing dependencies and preparing models. |
 
+| 2026-11-03 | Expand TTS evaluation to more Piper voices plus Qwen3-TTS 0.6B on CPU, in an isolated environment. | Owner selected the broader comparison; no final TTS provider or voices approved yet. |
+
 ## 6. Execution log
 
 ### 2026-11-03 — M0 complete; M1 benchmark tooling prepared
@@ -372,3 +374,19 @@ Track each milestone as **Not started → In progress → Verification → Done*
 - The server command remains `uv run --project benchmarks --no-sync python benchmarks/run_all.py`. On a fresh checkout, it retrieves public speech and transcripts directly from Google FLEURS via Hugging Face, creates the fixtures locally, and reuses previously prepared model weights. No laptop download or artifact transfer is required.
 - Updated the runbook to remove the ZIP workflow. This change is verified offline with simulated upstream data; no live laptop download is required.
 - Verification: all 23 benchmark-tool tests passed, including first-run source download with simulated upstream data, transcript/archive pairing, cache reuse without network access, and cleanup after interrupted downloads. `git diff --check` passed.
+
+### 2026-11-03 — First target-server results inspected
+
+- Recorded findings in `docs/benchmark_findings_20261103.md`, including report identity, timings, resource usage, quality observations, and outstanding acceptance checks.
+- Confirmed all 63 generated WAVs copied intact. Translation/TTS completed; neither ASR candidate reached inference because faster-whisper passed a keyword removed in the locked PyAV version.
+- Identified a translation meaning loss and repeated missing-phoneme warnings for Eva/Karlsson; did not equate execution success with quality approval. M1 remains in progress.
+- Next repair is to constrain PyAV below 19 and regenerate the lock, then synchronize and rerun ASR on the server. This results-inspection step did not alter dependencies or the original benchmark outputs.
+
+### 2026-11-03 — ASR dependency repair and expanded TTS benchmark
+
+- Added the upstream-compatible `av<19` bound and regenerated the main lock to PyAV 18.1.0. Future ASR reports include PyAV version and normalized word error rates. Actual ASR inference still needs the server rerun.
+- Added group/candidate selectors so ASR can be rerun without translation/TTS, and individual voices can be retried independently. Preparation preserves existing model records and downloads only missing candidates.
+- Expanded Piper to six variants (five distinct speakers), and added Qwen3-TTS 0.6B CustomVoice with Ryan, Aiden, and Serena. Qwen has a separate Python 3.12 dependency lock, CPU Torch/Torchaudio, float32 eager inference, and seeded generation. It does not alter the main Transformers environment.
+- Added twenty German pronunciation/usage fixtures for a total of 27 inputs. Two repetitions over nine TTS configurations produce up to 486 WAVs. The 1,000-character stress input stays unchanged for comparison with round one.
+- Added an offline HTML listening comparison, scoring CSV, warning counts, installed-package evidence, and checkpoint/log preservation on timeout. Original server reports and samples remain unchanged.
+- Verification: 33 offline tests passed, covering model reuse, candidate selection, CPU Qwen adapter calls, ASR lazy inference/scoring, HTML escaping/portable audio links, and timeout evidence recovery. Both dependency locks pass offline consistency checks. These do not claim actual Qwen inference or server ASR success; those measurements and owner quality approval are pending.
