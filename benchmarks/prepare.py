@@ -1,3 +1,7 @@
+try:
+    from storage import ARTIFACTS, MODELS
+except ModuleNotFoundError:
+    from benchmarks.storage import ARTIFACTS, MODELS
 """Download candidate snapshots once; record immutable revisions and voice hashes."""
 
 import hashlib
@@ -13,8 +17,8 @@ def main() -> None:
     parser.add_argument("--extended-tts", action="store_true", help="Add Thorsten high, Kerstin low, and Ramona low")
     parser.add_argument("--qwen", action="store_true", help="Add Qwen3-TTS 0.6B with Ryan, Aiden, and Serena")
     args = parser.parse_args()
-    root = Path(__file__).parent / "artifacts"
-    root.mkdir(exist_ok=True)
+    root = MODELS
+    root.mkdir(parents=True, exist_ok=True)
     manifest = root / "models.json"
     models = json.loads(manifest.read_text()) if manifest.exists() else {}
 

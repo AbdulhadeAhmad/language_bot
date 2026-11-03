@@ -66,7 +66,7 @@ class SelectionTests(unittest.TestCase):
                 return str(path)
 
             hub = SimpleNamespace(snapshot_download=MagicMock(side_effect=snapshot), hf_hub_download=download, HfApi=lambda: SimpleNamespace(model_info=lambda repo: SimpleNamespace(sha="a" * 40)))
-            with patch.object(prepare, "__file__", str(root / "prepare.py")), patch.dict(sys.modules, {"huggingface_hub": hub}), patch.object(sys, "argv", ["prepare.py", "--extended-tts", "--qwen"]):
+            with patch.object(prepare, "MODELS", artifacts), patch.dict(sys.modules, {"huggingface_hub": hub}), patch.object(sys, "argv", ["prepare.py", "--extended-tts", "--qwen"]):
                 prepare.main()
             prepared = json.loads((artifacts / "models.json").read_text())
             self.assertEqual(len(prepared), 12)

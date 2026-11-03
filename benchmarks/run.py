@@ -1,3 +1,7 @@
+try:
+    from storage import ARTIFACTS, MODELS
+except ModuleNotFoundError:
+    from benchmarks.storage import ARTIFACTS, MODELS
 """Async orchestration of sequential, process-isolated model benchmarks."""
 
 import argparse
@@ -102,7 +106,7 @@ async def run(args):
     qwen_python = getattr(args, "qwen_python", None)
     if any(model.get("provider") == "qwen3_tts" for model in models.values()):
         if qwen_python is None or not Path(qwen_python).is_file():
-            raise ValueError("Selected Qwen candidates require --qwen-python benchmarks/qwen/.venv/bin/python (sync that project first)")
+            raise ValueError("Selected Qwen candidates require --qwen-python $LANGUAGE_BOT_DATA_DIR/venvs/qwen/bin/python (sync that project first)")
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)  # Never overwrite earlier evidence.
     report = {
@@ -150,7 +154,7 @@ async def run(args):
 
 def parser():
     result = argparse.ArgumentParser(description=__doc__)
-    result.add_argument("--models", type=Path, default=ROOT / "artifacts/models.json")
+    result.add_argument("--models", type=Path, default=MODELS / "models.json")
     result.add_argument("--audio-manifest", type=Path)
     result.add_argument("--only", choices=["all", "asr", "translation", "tts"], default="all")
     result.add_argument("--candidates", nargs="+")

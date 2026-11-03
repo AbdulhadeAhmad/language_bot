@@ -1,3 +1,7 @@
+try:
+    from storage import ARTIFACTS, MODELS
+except ModuleNotFoundError:
+    from benchmarks.storage import ARTIFACTS, MODELS
 """Fetch public FLEURS German speech and build a reusable ASR fixture manifest."""
 
 import argparse
@@ -196,7 +200,7 @@ def prepare(output: Path, refresh: bool = False) -> Path:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", type=Path, default=ROOT / "artifacts/public-audio")
+    parser.add_argument("--output", type=Path, default=ARTIFACTS / "public-audio")
     parser.add_argument("--refresh", action="store_true")
     args = parser.parse_args()
     print(f"Audio manifest: {prepare(args.output, args.refresh)}")

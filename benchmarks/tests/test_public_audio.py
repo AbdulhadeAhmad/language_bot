@@ -96,7 +96,7 @@ class PublicAudioTests(unittest.TestCase):
                 self.assertIn("--cores", command)
                 return SimpleNamespace(returncode=0)
 
-            with patch.object(run_all, "ROOT", root), patch.object(run_all, "prepare", return_value=root / "audio.json") as prepare, patch.object(run_all.subprocess, "run", side_effect=execute), patch.object(sys, "argv", ["run_all.py", "--output", str(output)]):
+            with patch.object(run_all, "ROOT", root), patch.object(run_all, "MODELS", root / "artifacts"), patch.object(run_all, "ARTIFACTS", root / "artifacts"), patch.object(run_all, "prepare", return_value=root / "audio.json") as prepare, patch.object(run_all.subprocess, "run", side_effect=execute), patch.object(sys, "argv", ["run_all.py", "--output", str(output)]):
                 self.assertEqual(run_all.main(), 0)
                 prepare.assert_called_once()
             self.assertIn("asr_base | ok", (output / "summary.md").read_text())
@@ -106,7 +106,7 @@ class PublicAudioTests(unittest.TestCase):
             root = Path(temporary)
             (root / "artifacts").mkdir()
             (root / "artifacts/models.json").write_text('{"asr_base": {"path": "fake"}}')
-            with patch.object(run_all, "ROOT", root), patch.object(run_all, "prepare") as prepare, patch.object(sys, "argv", ["run_all.py", "--output", str(root)]):
+            with patch.object(run_all, "ROOT", root), patch.object(run_all, "MODELS", root / "artifacts"), patch.object(run_all, "ARTIFACTS", root / "artifacts"), patch.object(run_all, "prepare") as prepare, patch.object(sys, "argv", ["run_all.py", "--output", str(root)]):
                 with self.assertRaises(SystemExit):
                     run_all.main()
                 prepare.assert_not_called()

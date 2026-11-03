@@ -1,3 +1,7 @@
+try:
+    from storage import ARTIFACTS, MODELS
+except ModuleNotFoundError:
+    from benchmarks.storage import ARTIFACTS, MODELS
 """Download public speech as needed, run every model, and print a concise summary."""
 
 import argparse
@@ -42,17 +46,17 @@ def main() -> int:
     args = parser.parse_args()
     if args.cores < 1 or args.runs < 2 or args.timeout <= 0:
         parser.error("Require positive cores/timeout and at least two runs")
-    if not (ROOT / "artifacts/models.json").is_file():
+    if not (MODELS / "models.json").is_file():
         parser.error("Run benchmarks/prepare.py first to download the models")
-    output = args.output or ROOT / "artifacts" / datetime.now(timezone.utc).strftime("results-%Y%m%d-%H%M%S-%f")
+    output = args.output or ARTIFACTS / datetime.now(timezone.utc).strftime("results-%Y%m%d-%H%M%S-%f")
     if output.exists():
         parser.error("Output directory already exists; choose a new one to preserve previous results")
-    models = select_models(json.loads((ROOT / "artifacts/models.json").read_text()), args.only, args.candidates)
+    models = select_models(json.loads((MODELS / "models.json").read_text()), args.only, args.candidates)
     if any(model.get("provider") == "qwen3_tts" for model in models.values()) and (args.qwen_python is None or not args.qwen_python.is_file()):
-        parser.error("Qwen needs --qwen-python benchmarks/qwen/.venv/bin/python; sync benchmarks/qwen first")
+        parser.error("Qwen needs --qwen-python $LANGUAGE_BOT_DATA_DIR/venvs/qwen/bin/python; sync benchmarks/qwen first")
     command = [sys.executable, str(ROOT / "run.py"), "--output", str(output), "--cores", str(args.cores), "--runs", str(args.runs), "--timeout", str(args.timeout), "--only", args.only, "--suite", args.suite]
     if any(model_kind(key, model) == "asr" for key, model in models.items()):
-        manifest = prepare(ROOT / "artifacts/public-audio")
+        manifest = prepare(ARTIFACTS / "public-audio")
         command += ["--audio-manifest", str(manifest)]
     if args.candidates:
         command += ["--candidates", *args.candidates]

@@ -1,3 +1,5 @@
+> Runtime files now live outside the checkout. Before the commands below, run `bash scripts/init_data.sh`, then `source scripts/env.sh benchmarks`. For Qwen environment installation, use `source scripts/env.sh qwen`; switch back to `benchmarks` before running the benchmark runner. Model weights and the live manifest are under `$LANGUAGE_BOT_DATA_DIR/models`; recordings and results are under `$LANGUAGE_BOT_DATA_DIR/benchmarks`. See [operations](../docs/operations.md) for migration and environment setup.
+
 # M1: target-server CPU benchmarks
 
 This is an isolated experiment, not the bot implementation. Candidates are **not approved production choices**. Run on the planned Linux server (4 cores, 16 GB RAM, approximately 400 GB SSD). Waiting for inference is acceptable; the future bot must use a separate worker.
@@ -16,11 +18,13 @@ This reuses the human speech and downloaded ASR models. Reports now include the 
 For the larger TTS test, prepare a **separate** Qwen environment and download only the missing candidate models on the server:
 
 ```bash
+source scripts/env.sh qwen
 uv sync --project benchmarks/qwen --python python3.12 --locked
+source scripts/env.sh benchmarks
 uv run --project benchmarks --no-sync python benchmarks/prepare.py --extended-tts --qwen
 uv run --project benchmarks --no-sync python benchmarks/run_all.py \
   --only tts --suite extended --runs 2 --timeout 7200 \
-  --qwen-python benchmarks/qwen/.venv/bin/python
+  --qwen-python "$LANGUAGE_BOT_DATA_DIR/venvs/qwen/bin/python"
 ```
 
 Candidate comparison:
@@ -45,7 +49,7 @@ To repeat only one candidate, use `--candidates`, for example:
 ```bash
 uv run --project benchmarks --no-sync python benchmarks/run_all.py \
   --only tts --candidates qwen_0_6b_ryan --suite basic --runs 2 --timeout 7200 \
-  --qwen-python benchmarks/qwen/.venv/bin/python
+  --qwen-python "$LANGUAGE_BOT_DATA_DIR/venvs/qwen/bin/python"
 ```
 
 The Qwen adapter/protocol and orchestration are covered by offline tests, but actual Qwen inference, memory, and package installation still require the server run. Local dependency-lock checks do not establish model feasibility. The 2,048-token generation ceiling is recorded; listening review must check complete delivery, especially on the long sample.
@@ -67,7 +71,7 @@ uv run --project benchmarks --no-sync python -c 'from faster_whisper import Whis
 uv run --project benchmarks --no-sync python benchmarks/prepare.py
 ```
 
-Preparation requires internet and downloads model weights, tokenizer files, and voice cards into ignored `benchmarks/artifacts/`. It records resolved model revisions and voice checksums in `artifacts/models.json`. Keep that manifest with your results. Preparation may download several GB and is not included in inference timing. Do not rerun preparation between comparisons without preserving the previous manifest. Runtime inference uses local files only.
+Preparation requires internet and downloads model weights, tokenizer files, and voice cards into `$LANGUAGE_BOT_DATA_DIR/models/`. It records resolved model revisions and voice checksums in `$LANGUAGE_BOT_DATA_DIR/models/models.json`. Keep that manifest with your results. Preparation may download several GB and is not included in inference timing. Do not rerun preparation between comparisons without preserving the previous manifest. Runtime inference uses local files only.
 
 If dependency downloads time out on a slow connection, retry the sync command with `UV_HTTP_TIMEOUT=120` before it. Local preparation verified dependency resolution, but package downloads timed out before installation completed; provider imports and actual model execution must still be verified on the target server.
 
@@ -79,13 +83,13 @@ If you already installed dependencies and ran `prepare.py`, do not repeat those 
 uv run --project benchmarks --no-sync python benchmarks/run_all.py
 ```
 
-For the original six-candidate manifest, this reuses `artifacts/models.json`, prepares or verifies public German audio automatically, runs the candidates, and prints the results directory. No recordings, transcripts, manual manifest editing, or account are required. Results get a new timestamped directory on each run. The default is four CPUs, three repetitions, and a one-hour timeout per candidate. After adding Qwen candidates, supply `--qwen-python` as shown above, or select an independent group such as `--only asr`.
+For the original six-candidate manifest, this reuses `$LANGUAGE_BOT_DATA_DIR/models/models.json`, prepares or verifies public German audio automatically, runs the candidates, and prints the results directory. No recordings, transcripts, manual manifest editing, or account are required. Results get a new timestamped directory on each run. The default is four CPUs, three repetitions, and a one-hour timeout per candidate. After adding Qwen candidates, supply `--qwen-python` as shown above, or select an independent group such as `--only asr`.
 
 The ready-made audio is from [Google FLEURS](https://huggingface.co/datasets/google/fleurs), German (`de_de`) test split, licensed [CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/). The downloader streams the original archive at a resolved immutable revision, bypassing the dataset preview service. It selects six distinct human utterances with their provided transcripts, converts them to mono 16 kHz PCM WAV, and creates a two-minute stress sample from complete utterances with short gaps and trailing silence. No words are cut or invented. `attribution.json` records the source revision, utterances, hashes, license, and transformations.
 
 The two-minute sample tests long-input processing; it is assembled speech, not a continuous natural conversation or a learner-pronunciation evaluation. The first six files remain separate quality examples. Public fixtures suffice to run this benchmark; personal recordings are optional for later real-world evaluation.
 
-The first server run downloads the speech and transcripts directly from the public source. No ZIP, audio files, or manifests need to be transferred from your laptop. Generated artifacts stay in the ignored `benchmarks/artifacts/` directory. Cached audio is checksum-verified on later runs. If files are missing or modified, repair them explicitly:
+The first server run downloads the speech and transcripts directly from the public source. No ZIP, audio files, or manifests need to be transferred from your laptop. Generated artifacts stay in the ignored `$LANGUAGE_BOT_DATA_DIR/benchmarks/` directory. Cached audio is checksum-verified on later runs. If files are missing or modified, repair them explicitly:
 
 ```bash
 uv run --project benchmarks --no-sync python benchmarks/prepare_audio.py --refresh
@@ -95,7 +99,7 @@ For custom limits or a specific new output directory:
 
 ```bash
 uv run --project benchmarks --no-sync python benchmarks/run_all.py \
-  --output benchmarks/artifacts/results-01 \
+  --output $LANGUAGE_BOT_DATA_DIR/benchmarks/results-01 \
   --cores 4 --runs 3 --timeout 3600
 ```
 
