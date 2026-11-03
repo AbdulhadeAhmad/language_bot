@@ -9,7 +9,7 @@ The async application foundation supports registration, channel-based approval, 
 ```bash
 bash scripts/init_data.sh
 # Edit ~/language_bot_data/.env with your credentials and admin/channel IDs.
-bash scripts/compose.sh up -d --build
+docker compose up -d --build
 ```
 
 nginx can reach the bot at `127.0.0.1:8060`. All persistent configuration, PostgreSQL data, models, results, and runtime files live outside the source checkout under `~/language_bot_data` (override with absolute `LANGUAGE_BOT_DATA_DIR`).

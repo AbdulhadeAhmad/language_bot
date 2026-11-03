@@ -422,3 +422,8 @@ Track each milestone as **Not started → In progress → Verification → Done*
 - Rebuilt/recreated the isolated deployment from `/tmp/language-bot-relocated-checkout` with the same external data root. Approved user record, configuration checksum, and model marker survived. Confirmed worker startup and readiness, then stopped the test deployment.
 - Installed the external development environment at `/home/abdulhade/language_bot_data/venvs/app`; cache reuse resolved stalled downloads. External `.env` contains setup placeholders, not live bot credentials. Original repository artifacts/environments remain as retained copies; new documented workflows use the external root.
 - Live Telegram registration and channel delivery were not attempted with placeholder credentials. Follow [operations](docs/operations.md) for channel rights, configuration, nginx, and webhook registration. No M3 sentence features or new model experiments were started.
+
+### 2026-11-04 — Standard Docker Compose commands
+
+- Compose now defaults directly to `$HOME/language_bot_data` and loads the external `.env` for every service, including PostgreSQL. No wrapper, shell sourcing, or `--env-file` flag is required for ordinary deployment commands.
+- `LANGUAGE_BOT_DATA_DIR` remains an optional shell override. Updated operational commands to plain `docker compose`; retained the old wrapper as a compatibility alias.

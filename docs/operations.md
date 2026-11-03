@@ -20,12 +20,12 @@ New private `/start` users become pending and produce one channel request. Repea
 ## Start and expose the webhook
 
 ```bash
-bash scripts/compose.sh up -d --build
+docker compose up -d --build
 curl --fail http://127.0.0.1:8060/health/ready
-bash scripts/compose.sh ps
+docker compose ps
 ```
 
-The stable Compose project is `language-bot`. PostgreSQL persists in `$LANGUAGE_BOT_DATA_DIR/postgres`, with no host port. App logs, temporary files, and caches use external bind mounts; app containers do not mount the repository. Image-installed application dependencies are disposable. Models are external and currently unused by the foundation services; future inference workers should mount the models directory read-only.
+No shell wrapper or sourced environment is required for Docker commands. Compose reads `~/language_bot_data/.env` directly for each service. To use another data location, export `LANGUAGE_BOT_DATA_DIR` before running Compose; the default works without it. The stable Compose project is `language-bot`. PostgreSQL persists in `$LANGUAGE_BOT_DATA_DIR/postgres`, with no host port. App logs, temporary files, and caches use external bind mounts; app containers do not mount the repository. Image-installed application dependencies are disposable. Models are external and currently unused by the foundation services; future inference workers should mount the models directory read-only.
 
 The host port binds **only** `127.0.0.1:8060`. The process listens on `0.0.0.0:8060` inside Docker so its published port works. Configure your host nginx HTTPS server with:
 
@@ -41,7 +41,7 @@ location = /telegram/webhook {
 Register the webhook once the HTTPS route works:
 
 ```bash
-bash scripts/compose.sh exec api python -m app.bot.webhook --url https://YOUR_DOMAIN/telegram/webhook
+docker compose exec api python -m app.bot.webhook --url https://YOUR_DOMAIN/telegram/webhook
 ```
 
 Startup never registers or changes a real webhook automatically. Native Telegram parsing retains the secret check, body-size limit, and durable update-ID deduplication. Handler errors propagate and roll back their transaction. Multiple outgoing effects have stable action keys. Ambiguous external send outcomes remain `uncertain` instead of being blindly resent. Review failed/uncertain rows in `telegram_deliveries` when diagnosing a missing notification; rerun only after checking the actual Telegram outcome.
@@ -82,16 +82,16 @@ If an earlier Compose deployment has data in a named PostgreSQL volume, dump it 
 
 ```bash
 source scripts/env.sh app
-bash scripts/compose.sh exec -T db pg_dump -U language_bot -d language_bot -Fc > "$LANGUAGE_BOT_DATA_DIR/backups/database.dump"
+docker compose exec -T db pg_dump -U language_bot -d language_bot -Fc > "$LANGUAGE_BOT_DATA_DIR/backups/database.dump"
 ```
 
 For a fresh destination, initialize external configuration, start only PostgreSQL, restore the dump, then start the app:
 
 ```bash
-bash scripts/compose.sh up -d db
+docker compose up -d db
 # Wait until db is healthy before restoring.
-bash scripts/compose.sh exec -T db pg_restore -U language_bot -d language_bot --no-owner < "$LANGUAGE_BOT_DATA_DIR/backups/database.dump"
-bash scripts/compose.sh up -d --build
+docker compose exec -T db pg_restore -U language_bot -d language_bot --no-owner < "$LANGUAGE_BOT_DATA_DIR/backups/database.dump"
+docker compose up -d --build
 ```
 
-Back up `.env` and any desired model/benchmark files separately. Keep backups outside this host as well if recovery from disk loss is required. To redeploy from another checkout, use the same absolute data root and `scripts/compose.sh`; users, configuration, database, models, and reports survive deletion of the source checkout. `docker compose down` does not remove bind-mounted data. Keep any uncommitted source changes in version control before deleting a checkout.
+Back up `.env` and any desired model/benchmark files separately. Keep backups outside this host as well if recovery from disk loss is required. To redeploy from another checkout, use the same absolute data root and standard `docker compose` commands; users, configuration, database, models, and reports survive deletion of the source checkout. `docker compose down` does not remove bind-mounted data. Keep any uncommitted source changes in version control before deleting a checkout.
