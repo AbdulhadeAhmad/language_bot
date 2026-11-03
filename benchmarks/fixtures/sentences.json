@@ -1,0 +1,8 @@
+[
+  {"id": "everyday", "german": "Ich muss morgen früh arbeiten.", "reference_english": "I have to work early tomorrow."},
+  {"id": "negation", "german": "Ich habe heute keine Zeit, aber morgen kann ich dir helfen.", "reference_english": "I do not have time today, but I can help you tomorrow."},
+  {"id": "question", "german": "Könnten Sie mir bitte sagen, wann der nächste Zug nach München fährt?", "reference_english": "Could you please tell me when the next train to Munich leaves?"},
+  {"id": "numbers", "german": "Der Termin ist am dritten November um vierzehn Uhr dreißig.", "reference_english": "The appointment is on the third of November at two thirty in the afternoon."},
+  {"id": "subordinate", "german": "Obwohl es geregnet hat, sind wir zu Fuß nach Hause gegangen.", "reference_english": "Although it rained, we walked home."},
+  {"id": "umlauts", "german": "Die fünf größeren Bücher stehen neben der weißen Tür.", "reference_english": "The five larger books are next to the white door."}
+]

@@ -8,8 +8,8 @@ Move each milestone through **Not started → In progress → Verification → D
 
 | Milestone | Status | Evidence / notes |
 |---|---|---|
-| M0 — Specification and tracking | Not started | |
-| M1 — Runtime and model feasibility | Not started | |
+| M0 — Specification and tracking | Done | [30 acceptance scenarios](docs/acceptance_scenarios.md) cover ownership, duplicates, privacy, copying, editing, deletion, and review behavior; checked against the revised specification. |
+| M1 — Runtime and model feasibility | In progress | [Benchmark package and target-server runbook](benchmarks/README.md) prepared; isolated dependency lock generated. Harness tests pass. Target-server measurements, license review, and owner quality acceptance are pending. |
 | M2 — Async application foundation | Not started | |
 | M3 — Collections and duplicate warnings | Not started | |
 | M4 — Durable jobs and archive storage | Not started | |
@@ -113,7 +113,7 @@ All public reads—including playback and callbacks from old discovery messages�
 
 Each milestone closes only when its acceptance checks pass. Implement milestones in order; milestone 1 is a deliberate feasibility gate before choosing model packages.
 
-### [ ] M0 — Lock the specification and project tracking
+### [x] M0 — Lock the specification and project tracking
 
 **Deliverables**
 
@@ -338,3 +338,17 @@ Track each milestone as **Not started → In progress → Verification → Done*
 | 2026-11-03 | Merged `Sentence` and `UserSentence` into one user-owned `Sentence` model. Copies create separate sentence records; shared media references remain independent of sentence ownership. | Global German-text uniqueness is no longer required, so the separate personal-entry model adds no value. |
 | 2026-11-03 | Added nullable `copied_from_sentence_id` to track a copy’s immediate source. Preserve the link through edits and clear it on source deletion; source-change notifications remain a future feature. | Project owner requested copy provenance for tracking and later change notifications. |
 | 2026-11-03 | Defined both translation directions as mental-recall flashcards with spoiler-hidden answers and inline Again/Hard/Good/Easy grading. No typed answer is required; typed-answer translation tests are separate future modes. | Project owner clarified the translation practice interaction. |
+| 2026-11-03 | Prepare M1 benchmarks here for the owner to run on the target server. The development workspace reports 12 logical CPUs and approximately 23 GiB RAM, so it is not the target hardware. | Owner explicitly selected target-server benchmark preparation. |
+| 2026-11-03 | Use an isolated Python 3.12 benchmark environment with a dependency lock; evaluate faster-whisper base/small INT8, OPUS-MT, and three Piper voices. These are candidates, not final provider/runtime choices. | CPU feasibility investigation; application dependencies and Python pin remain unchanged pending M1 evidence. |
+
+## 6. Execution log
+
+### 2026-11-03 — M0 complete; M1 benchmark tooling prepared
+
+- Added `docs/acceptance_scenarios.md` with 30 observable scenarios mapped to milestones; reviewed them against the current ownership, duplicate-warning, provenance, privacy, and spoiler-flashcard rules.
+- Added isolated benchmark preparation, async subprocess orchestration, and provider experiments under `benchmarks/`. Models run sequentially with CPU affinity; reports capture load/inference timing, peak RSS, input/model identity, outputs, and errors. Downloads are separate from measured inference.
+- Added six representative German text fixtures plus an exact 1,000-character stress case. Human audio, including a two-minute recording, must be supplied on the target server; skipped ASR produces an incomplete suite, not a passing result.
+- Added the server runbook and quality-review checklist. Generated audio is retained only as ignored benchmark evidence for listening review, separate from production audio-lifecycle requirements.
+- Verification: `python3 -m unittest discover -s benchmarks/tests -v` passed 13 tests; CLI help and `git diff --check` passed. These are benchmark-tool tests, not real-model or application acceptance results.
+- Dependency resolution completed and produced `benchmarks/uv.lock`. Local installation failed during package downloads with a network timeout; provider imports and actual inference have not been verified. The server runbook includes installation and an import check before downloading model weights.
+- Remaining M1 work: run the locked environment and candidate models on the target server, inspect memory and latency, review model/voice licenses, listen to samples, and record final model/runtime decisions with owner acceptance. M2 has not started because M1 remains the agreed feasibility gate.

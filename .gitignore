@@ -8,3 +8,9 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Local benchmark models, recordings, reports, and caches
+benchmarks/artifacts/
+.env
+.env.*
+!.env.example
