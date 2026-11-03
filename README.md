@@ -1,14 +1,25 @@
 # German Learning Telegram Bot
 
-A private-by-default, multi-user German sentence library with Telegram audio storage and spaced-repetition practice. Implementation is tracked in [implementation_plan.md](implementation_plan.md); the original brief is [project_description.md](project_description.md).
+The async application foundation supports registration, channel-based approval, and `/admin` access management. Sentence capture and reviews are upcoming milestones. Progress and decisions are tracked in [implementation_plan.md](implementation_plan.md).
 
-Current work: M0 acceptance scenarios are documented; M1 model benchmarks are prepared for the target server. The bot itself is not implemented yet.
-
+- [Setup, deployment, admin workflow, external storage, and migration](docs/operations.md)
 - [Acceptance scenarios](docs/acceptance_scenarios.md)
-- [CPU benchmark setup and commands](benchmarks/README.md)
-
-Run benchmark-tool tests without downloading models:
+- [Model benchmarks](benchmarks/README.md)
 
 ```bash
-python3 -m unittest discover -s benchmarks/tests -v
+bash scripts/init_data.sh
+# Edit ~/language_bot_data/.env with your credentials and admin/channel IDs.
+bash scripts/compose.sh up -d --build
+```
+
+nginx can reach the bot at `127.0.0.1:8060`. All persistent configuration, PostgreSQL data, models, results, and runtime files live outside the source checkout under `~/language_bot_data` (override with absolute `LANGUAGE_BOT_DATA_DIR`).
+
+Development verification:
+
+```bash
+source scripts/env.sh app
+uv sync --locked
+uv run --no-sync pytest tests/unit -q
+bash scripts/test_integration.sh -q
+python3 -m unittest discover -s benchmarks/tests -q
 ```
