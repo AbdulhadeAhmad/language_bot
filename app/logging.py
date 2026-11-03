@@ -1,0 +1,42 @@
+import json
+import logging
+from datetime import UTC, datetime
+from logging.handlers import RotatingFileHandler
+
+from app.paths import data_root
+
+FIELDS = (
+    "user_id",
+    "entry_id",
+    "job_id",
+    "update_id",
+    "delivery_id",
+    "worker_role",
+    "operation",
+    "error_type",
+)
+
+
+class JsonFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        payload = {
+            "time": datetime.now(UTC).isoformat(),
+            "level": record.levelname,
+            "event": record.getMessage(),
+        }
+        payload.update({key: getattr(record, key) for key in FIELDS if hasattr(record, key)})
+        return json.dumps(payload)
+
+
+def configure_logging(level: str) -> None:
+    handler = logging.StreamHandler()
+    handler.setFormatter(JsonFormatter())
+    directory = data_root() / "logs"
+    directory.mkdir(parents=True, exist_ok=True)
+    import os
+
+    file_handler = RotatingFileHandler(
+        directory / f"app-{os.getpid()}.jsonl", maxBytes=5_000_000, backupCount=3
+    )
+    file_handler.setFormatter(JsonFormatter())
+    logging.basicConfig(level=level, handlers=[handler, file_handler], force=True)

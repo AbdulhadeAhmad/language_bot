@@ -14,3 +14,8 @@ benchmarks/artifacts/
 .env
 .env.*
 !.env.example
+
+# Test and lint caches
+.pytest_cache/
+.ruff_cache/
+.coverage
