@@ -360,8 +360,15 @@ Track each milestone as **Not started → In progress → Verification → Done*
 - Owner confirmed dependencies installed and `benchmarks/prepare.py` completed on the target server. No need to reinstall or redownload model weights for this update.
 - Added `prepare_audio.py`: downloads Google FLEURS German test speech from the original archive, pins its dataset revision, records attribution/checksums, and reuses verified local fixtures. The preview API was tested and failed; the implementation uses the original archive instead.
 - Downloaded and decoded six distinct human speech clips with dataset transcripts, plus an exact 120-second stress fixture assembled from complete utterances and silence. Verified all seven WAVs and manifest checksums. Dataset revision: `70bb2e84b976b7e960aa89f1c648e09c59f894dd`; license: CC-BY-4.0. No user recordings or manually written manifests are required.
-- Added `run_all.py`: reuses prepared models, prepares or verifies public audio, runs all candidates, and writes a readable summary beside the detailed report. A transfer ZIP contains the updated scripts and verified public fixtures, excluding model weights and server-specific model paths.
+- Added `run_all.py`: reuses prepared models, prepares or verifies public audio, runs all candidates, and writes a readable summary beside the detailed report. The initial transfer-ZIP handoff was superseded by direct server-side downloading below.
 - The assembled two-minute fixture tests duration/resource handling; it does not establish accuracy on continuous conversation or learner pronunciation. Personal recordings may be used later but are not required to execute M1 benchmarks.
 - Target-server model timings and owner quality approval remain pending; fixture validation does not complete M1.
 
 - Verification for this update: all 20 benchmark-tool tests passed; live public-audio preparation and cached checksum verification succeeded; the transfer archive was integrity-checked.
+
+### 2026-11-03 — Direct server downloads; undo committed artifact additions
+
+- Inspected commit `1e69afd` (`added the artifacts`). Removed its generated ZIP, WAVs, attribution, and manifest from the working tree and restored the `benchmarks/artifacts/` ignore rule. Retained the downloader, runner, and tests needed for server-side preparation; Git history was not rewritten.
+- The server command remains `uv run --project benchmarks --no-sync python benchmarks/run_all.py`. On a fresh checkout, it retrieves public speech and transcripts directly from Google FLEURS via Hugging Face, creates the fixtures locally, and reuses previously prepared model weights. No laptop download or artifact transfer is required.
+- Updated the runbook to remove the ZIP workflow. This change is verified offline with simulated upstream data; no live laptop download is required.
+- Verification: all 23 benchmark-tool tests passed, including first-run source download with simulated upstream data, transcript/archive pairing, cache reuse without network access, and cleanup after interrupted downloads. `git diff --check` passed.

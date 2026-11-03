@@ -3,6 +3,7 @@ import io
 import json
 from pathlib import Path
 import tempfile
+import tarfile
 import unittest
 import wave
 import sys
@@ -35,6 +36,52 @@ def recordings(count=12):
 
 
 class PublicAudioTests(unittest.TestCase):
+    def test_first_run_downloads_source_and_second_run_uses_cache(self):
+        revision = "d" * 40
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "public-audio"
+            with patch.object(audio, "fetch", return_value=json.dumps({"sha": revision}).encode()) as fetch, patch.object(audio, "original_recordings", side_effect=lambda value: (row for row in recordings())) as source:
+                manifest = audio.prepare(root)
+                fetch.assert_called_once_with("https://huggingface.co/api/datasets/google/fleurs")
+                source.assert_called_once_with(revision)
+                self.assertTrue(manifest.is_file())
+            with patch.object(audio, "fetch") as fetch, patch.object(audio, "original_recordings") as source:
+                self.assertEqual(audio.prepare(root), manifest)
+                fetch.assert_not_called()
+                source.assert_not_called()
+
+    def test_download_failure_does_not_publish_partial_fixtures(self):
+        def broken_source(revision):
+            yield recordings(1)[0]
+            raise OSError("source unreachable")
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "public-audio"
+            with patch.object(audio, "fetch", return_value=json.dumps({"sha": "e" * 40}).encode()), patch.object(audio, "original_recordings", side_effect=broken_source):
+                with self.assertRaisesRegex(OSError, "unreachable"):
+                    audio.prepare(root)
+            self.assertFalse((root / "manifest.json").exists())
+            self.assertEqual(list(Path(temporary).glob("audio-download-*")), [])
+
+    def test_original_archive_download_pairs_audio_with_transcript(self):
+        revision = "f" * 40
+        payload = wav_bytes(1)
+        buffer = io.BytesIO()
+        with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+            for filename in ("test/example.wav", "test/unlisted.wav"):
+                member = tarfile.TarInfo(filename)
+                member.size = len(payload)
+                archive.addfile(member, io.BytesIO(payload))
+        transcript = "1\texample.wav\tGuten Morgen.\tguten morgen\tg u t\t16000\tMALE\n"
+        with patch.object(audio, "fetch", return_value=transcript.encode()) as fetch, patch.object(audio.urllib.request, "urlopen", return_value=io.BytesIO(buffer.getvalue())) as download:
+            rows = list(audio.original_recordings(revision))
+        base = f"https://huggingface.co/datasets/google/fleurs/resolve/{revision}/data/de_de"
+        fetch.assert_called_once_with(f"{base}/test.tsv")
+        self.assertEqual(download.call_args.args[0].full_url, f"{base}/audio/test.tar.gz")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["raw_transcription"], "Guten Morgen.")
+        self.assertEqual(rows[0]["audio_bytes"], payload)
+
     def test_wrapper_reuses_models_and_writes_summary(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

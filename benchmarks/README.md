@@ -25,7 +25,7 @@ If dependency downloads time out on a slow connection, retry the sync command wi
 
 ## Run everything with supplied German speech
 
-If you already installed dependencies and ran `prepare.py`, do not repeat those steps. Upload the updated benchmark scripts (or extract the supplied `benchmark-update.zip` from the repository root), then run:
+If you already installed dependencies and ran `prepare.py`, do not repeat those steps. Update the source code on the server, then run from the repository root:
 
 ```bash
 uv run --project benchmarks --no-sync python benchmarks/run_all.py
@@ -37,7 +37,7 @@ The ready-made audio is from [Google FLEURS](https://huggingface.co/datasets/goo
 
 The two-minute sample tests long-input processing; it is assembled speech, not a continuous natural conversation or a learner-pronunciation evaluation. The first six files remain separate quality examples. Public fixtures suffice to run this benchmark; personal recordings are optional for later real-world evaluation.
 
-The supplied update ZIP includes verified audio in `benchmarks/artifacts/public-audio/`. If you upload only the scripts, the first run downloads the audio automatically. Cached audio is checksum-verified on later runs. If files are missing or modified, repair them explicitly:
+The first server run downloads the speech and transcripts directly from the public source. No ZIP, audio files, or manifests need to be transferred from your laptop. Generated artifacts stay in the ignored `benchmarks/artifacts/` directory. Cached audio is checksum-verified on later runs. If files are missing or modified, repair them explicitly:
 
 ```bash
 uv run --project benchmarks --no-sync python benchmarks/prepare_audio.py --refresh
