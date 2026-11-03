@@ -10,7 +10,7 @@ wheels/
 .venv
 
 # Local benchmark models, recordings, reports, and caches
-benchmarks/artifacts/
+# benchmarks/artifacts/
 .env
 .env.*
 !.env.example

@@ -1,0 +1,78 @@
+[
+  {
+    "id": "fleurs_de_0148",
+    "path": "fleurs_de_0148.wav",
+    "reference_german": "Für die besten Aussichten auf Hongkong sollten Sie die Insel verlassen und zum gegenüberliegenden Ufer von Kowloon fahren.",
+    "duration_seconds": 17.94,
+    "source": "https://huggingface.co/datasets/google/fleurs",
+    "license": "https://creativecommons.org/licenses/by/4.0/",
+    "sha256": "cc46d12f9faf44a694e709c8bcf04028e686e6b4c1deefe3ac6dbd821a970630"
+  },
+  {
+    "id": "fleurs_de_0597",
+    "path": "fleurs_de_0597.wav",
+    "reference_german": "Er griff auch alles an, was ins Wasser kam; selbst ein großer Dinosaurier wie der T. Rex war ihm nicht gewachsen.",
+    "duration_seconds": 11.16,
+    "source": "https://huggingface.co/datasets/google/fleurs",
+    "license": "https://creativecommons.org/licenses/by/4.0/",
+    "sha256": "97d77a9d323b903dcc10c608521fa07fb78766d4b65d016ba620caae442dece9"
+  },
+  {
+    "id": "fleurs_de_0761",
+    "path": "fleurs_de_0761.wav",
+    "reference_german": "Wenn Sie den Film „Das Vermächtnis der Tempelritter“ gesehen haben, denken Sie vielleicht, dass auf die Rückseite der Unabhängigkeitserklärung eine Schatzkarte gezeichnet wurde.",
+    "duration_seconds": 12.42,
+    "source": "https://huggingface.co/datasets/google/fleurs",
+    "license": "https://creativecommons.org/licenses/by/4.0/",
+    "sha256": "653973c6e8fa8623883b83b429c112623011445bdbcf06da3db4358a71a5d06e"
+  },
+  {
+    "id": "fleurs_de_0439",
+    "path": "fleurs_de_0439.wav",
+    "reference_german": "Es leben noch viele Männer und Frauen, die ihre Zeit hier überlebt haben, und viele weitere mit Angehörigen, die dort ermordet wurden oder sich zu Tode arbeiteten, Juden und Nichtjuden gleichermaßen.",
+    "duration_seconds": 10.68,
+    "source": "https://huggingface.co/datasets/google/fleurs",
+    "license": "https://creativecommons.org/licenses/by/4.0/",
+    "sha256": "90c9e5da7736b3f5a7e87eb9322c151e7b496cd2a22a3e5719a8f530e5317976"
+  },
+  {
+    "id": "fleurs_de_0225",
+    "path": "fleurs_de_0225.wav",
+    "reference_german": "Die Höhle befindet sich auf der Spitze eines der Berge nördlich von Mekka und ist vom Rest der Welt völlig isoliert.",
+    "duration_seconds": 9.9,
+    "source": "https://huggingface.co/datasets/google/fleurs",
+    "license": "https://creativecommons.org/licenses/by/4.0/",
+    "sha256": "204e2f4abb6e4a363ed7e442146fa644e3ecbf0a9d2343643ae42316599c19c9"
+  },
+  {
+    "id": "fleurs_de_0455",
+    "path": "fleurs_de_0455.wav",
+    "reference_german": "Dieses Sediment war nötig, um Sandbänke und Strände zu bilden, die als Lebensräume für Wildtiere dienten.",
+    "duration_seconds": 8.4,
+    "source": "https://huggingface.co/datasets/google/fleurs",
+    "license": "https://creativecommons.org/licenses/by/4.0/",
+    "sha256": "c2af80e28d4bb55e6b536ed0b1e8827fdb76f7e4a5c33b643d3c333947a7e227"
+  },
+  {
+    "id": "two_minutes",
+    "path": "two_minutes.wav",
+    "reference_german": "Für die besten Aussichten auf Hongkong sollten Sie die Insel verlassen und zum gegenüberliegenden Ufer von Kowloon fahren. Er griff auch alles an, was ins Wasser kam; selbst ein großer Dinosaurier wie der T. Rex war ihm nicht gewachsen. Wenn Sie den Film „Das Vermächtnis der Tempelritter“ gesehen haben, denken Sie vielleicht, dass auf die Rückseite der Unabhängigkeitserklärung eine Schatzkarte gezeichnet wurde. Es leben noch viele Männer und Frauen, die ihre Zeit hier überlebt haben, und viele weitere mit Angehörigen, die dort ermordet wurden oder sich zu Tode arbeiteten, Juden und Nichtjuden gleichermaßen. Die Höhle befindet sich auf der Spitze eines der Berge nördlich von Mekka und ist vom Rest der Welt völlig isoliert. Dieses Sediment war nötig, um Sandbänke und Strände zu bilden, die als Lebensräume für Wildtiere dienten. Blogs können auch dazu beitragen, die Schreibfertigkeiten von Schülern zu verbessern. Zwar haben Schüler am Anfang ihrer Blogerfahrung oft eine schlampige Grammatik und Rechtschreibung, aber das ändert sich normalerweise, wenn es ein Publikum gibt. Nachdem der Damm 1963 erbaut worden war, kamen die jahreszeitlichen Überflutungen, die Sedimente im Fluss verteilen, zum Stillstand. Insbesondere wird behauptet, dass man erkennen kann, ob jemand lügt, indem man minimale Veränderungen des Gesichtsausdrucks richtig deutet.x",
+    "duration_seconds": 120,
+    "construction": "Complete human utterances concatenated with 250ms gaps; trailing silence to exactly 120s",
+    "trailing_silence_seconds": 3.82,
+    "source_ids": [
+      "fleurs_de_0148",
+      "fleurs_de_0597",
+      "fleurs_de_0761",
+      "fleurs_de_0439",
+      "fleurs_de_0225",
+      "fleurs_de_0455",
+      "fleurs_de_0201",
+      "fleurs_de_0651",
+      "fleurs_de_0327"
+    ],
+    "source": "https://huggingface.co/datasets/google/fleurs",
+    "license": "https://creativecommons.org/licenses/by/4.0/",
+    "sha256": "b1ac83ff31715849a620b5efa38446d5d1ba18a97f5529d51f9b858defbb2162"
+  }
+]

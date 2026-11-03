@@ -1,0 +1,94 @@
+{
+  "dataset": "google/fleurs",
+  "config": "de_de",
+  "split": "test",
+  "revision": "70bb2e84b976b7e960aa89f1c648e09c59f894dd",
+  "publisher": "Google",
+  "dataset_url": "https://huggingface.co/datasets/google/fleurs",
+  "license": "CC-BY-4.0",
+  "license_url": "https://creativecommons.org/licenses/by/4.0/",
+  "changes": "Decoded/resampled to mono 16kHz PCM16; two-minute stress fixture concatenates complete utterances and adds silence",
+  "sources": [
+    {
+      "id": "fleurs_de_0148",
+      "dataset_row": 148,
+      "dataset_id": "2003",
+      "dataset_filename": "10004059102127011984.wav",
+      "original_sha256": "1603ed8fcea31a7f32f51d137eaa3516d15aca947898b81a136f4a9732f08ad2",
+      "reference_german": "Für die besten Aussichten auf Hongkong sollten Sie die Insel verlassen und zum gegenüberliegenden Ufer von Kowloon fahren.",
+      "duration_seconds": 17.94
+    },
+    {
+      "id": "fleurs_de_0597",
+      "dataset_row": 597,
+      "dataset_id": "1738",
+      "dataset_filename": "10009182821551087671.wav",
+      "original_sha256": "90d0470adf728783e98cc8dddd51e2c2cbf0d6bf360da65f7d2ac5c3e65876aa",
+      "reference_german": "Er griff auch alles an, was ins Wasser kam; selbst ein großer Dinosaurier wie der T. Rex war ihm nicht gewachsen.",
+      "duration_seconds": 11.16
+    },
+    {
+      "id": "fleurs_de_0761",
+      "dataset_row": 761,
+      "dataset_id": "1849",
+      "dataset_filename": "10014044777125235464.wav",
+      "original_sha256": "13041e21e6a44d30da9595905fbb4367056191a513245b84e64a13449c8d08ea",
+      "reference_german": "Wenn Sie den Film „Das Vermächtnis der Tempelritter“ gesehen haben, denken Sie vielleicht, dass auf die Rückseite der Unabhängigkeitserklärung eine Schatzkarte gezeichnet wurde.",
+      "duration_seconds": 12.42
+    },
+    {
+      "id": "fleurs_de_0439",
+      "dataset_row": 439,
+      "dataset_id": "1683",
+      "dataset_filename": "10030056357041867775.wav",
+      "original_sha256": "fda294888110e8bc13a0e468033a21f3b0f2f6a6e7efe40c32583c4760a58f0e",
+      "reference_german": "Es leben noch viele Männer und Frauen, die ihre Zeit hier überlebt haben, und viele weitere mit Angehörigen, die dort ermordet wurden oder sich zu Tode arbeiteten, Juden und Nichtjuden gleichermaßen.",
+      "duration_seconds": 10.68
+    },
+    {
+      "id": "fleurs_de_0225",
+      "dataset_row": 225,
+      "dataset_id": "1739",
+      "dataset_filename": "10058186628567796965.wav",
+      "original_sha256": "8859c90aaeeb54915cc3a7d0010aba564f996f1bc6f393f184a06825d0940090",
+      "reference_german": "Die Höhle befindet sich auf der Spitze eines der Berge nördlich von Mekka und ist vom Rest der Welt völlig isoliert.",
+      "duration_seconds": 9.9
+    },
+    {
+      "id": "fleurs_de_0455",
+      "dataset_row": 455,
+      "dataset_id": "1796",
+      "dataset_filename": "10058299886985225661.wav",
+      "original_sha256": "4dba8160f102695aa4f5b5407241037e9d91bb6febd1854e7cda499e953abb7a",
+      "reference_german": "Dieses Sediment war nötig, um Sandbänke und Strände zu bilden, die als Lebensräume für Wildtiere dienten.",
+      "duration_seconds": 8.4
+    },
+    {
+      "id": "fleurs_de_0201",
+      "dataset_row": 201,
+      "dataset_id": "1990",
+      "dataset_filename": "10095057775426831514.wav",
+      "original_sha256": "fd254f62c724d0db0c1e0d288dbe121a4770ecb5b5547fad91d28a967d454499",
+      "reference_german": "Blogs können auch dazu beitragen, die Schreibfertigkeiten von Schülern zu verbessern. Zwar haben Schüler am Anfang ihrer Blogerfahrung oft eine schlampige Grammatik und Rechtschreibung, aber das ändert sich normalerweise, wenn es ein Publikum gibt.",
+      "duration_seconds": 12.96
+    },
+    {
+      "id": "fleurs_de_0651",
+      "dataset_row": 651,
+      "dataset_id": "1721",
+      "dataset_filename": "10159541282515887574.wav",
+      "original_sha256": "a7612cced65c81b0e67b7e4fd9fea1a6009d172f89fa30c2fd7beac519357476",
+      "reference_german": "Nachdem der Damm 1963 erbaut worden war, kamen die jahreszeitlichen Überflutungen, die Sedimente im Fluss verteilen, zum Stillstand.",
+      "duration_seconds": 19.68
+    },
+    {
+      "id": "fleurs_de_0327",
+      "dataset_row": 327,
+      "dataset_id": "1884",
+      "dataset_filename": "10166547362714956625.wav",
+      "original_sha256": "adf91db1187ebac0228f3cabe0be4f18c47c34702a8027793462e5f8485be7dc",
+      "reference_german": "Insbesondere wird behauptet, dass man erkennen kann, ob jemand lügt, indem man minimale Veränderungen des Gesichtsausdrucks richtig deutet.x",
+      "duration_seconds": 11.04
+    }
+  ]
+}

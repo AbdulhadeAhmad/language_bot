@@ -23,27 +23,35 @@ Preparation requires internet and downloads model weights, tokenizer files, and 
 
 If dependency downloads time out on a slow connection, retry the sync command with `UV_HTTP_TIMEOUT=120` before it. Local preparation verified dependency resolution, but package downloads timed out before installation completed; provider imports and actual model execution must still be verified on the target server.
 
-## Supply real German speech
+## Run everything with supplied German speech
 
-Create `benchmarks/artifacts/audio/`, place recordings there, and create `benchmarks/artifacts/audio/manifest.json`:
-
-```json
-[
-  {"id": "short", "path": "short.ogg", "reference_german": "Ich muss morgen früh arbeiten."},
-  {"id": "two_minutes", "path": "two_minutes.ogg", "reference_german": "The actual complete German transcript of this recording"}
-]
-```
-
-Use actual German reference text in both entries. Include clear speech, typical learner pronunciation, and a full two-minute recording; Telegram OGG/Opus is appropriate. Human recordings are required for quality acceptance: synthetic audio alone does not establish ASR quality. Paths are relative to the manifest. No recordings or transcripts are sent to an inference service; they remain local and ignored by git.
-
-## Run
+If you already installed dependencies and ran `prepare.py`, do not repeat those steps. Upload the updated benchmark scripts (or extract the supplied `benchmark-update.zip` from the repository root), then run:
 
 ```bash
-uv run --project benchmarks --no-sync python benchmarks/run.py \
-  --audio-manifest benchmarks/artifacts/audio/manifest.json \
-  --output benchmarks/artifacts/results-01 \
-  --cores 4 --runs 3 --timeout 1800
+uv run --project benchmarks --no-sync python benchmarks/run_all.py
 ```
+
+This reuses `artifacts/models.json`, prepares or verifies the public German audio automatically, runs all six model candidates, and prints the results directory. No recordings, transcripts, manifest editing, new packages, or account are required. Results get a new timestamped directory on each run. The default is four CPUs, three repetitions, and a one-hour timeout per candidate.
+
+The ready-made audio is from [Google FLEURS](https://huggingface.co/datasets/google/fleurs), German (`de_de`) test split, licensed [CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/). The downloader streams the original archive at a resolved immutable revision, bypassing the dataset preview service. It selects six distinct human utterances with their provided transcripts, converts them to mono 16 kHz PCM WAV, and creates a two-minute stress sample from complete utterances with short gaps and trailing silence. No words are cut or invented. `attribution.json` records the source revision, utterances, hashes, license, and transformations.
+
+The two-minute sample tests long-input processing; it is assembled speech, not a continuous natural conversation or a learner-pronunciation evaluation. The first six files remain separate quality examples. Public fixtures suffice to run this benchmark; personal recordings are optional for later real-world evaluation.
+
+The supplied update ZIP includes verified audio in `benchmarks/artifacts/public-audio/`. If you upload only the scripts, the first run downloads the audio automatically. Cached audio is checksum-verified on later runs. If files are missing or modified, repair them explicitly:
+
+```bash
+uv run --project benchmarks --no-sync python benchmarks/prepare_audio.py --refresh
+```
+
+For custom limits or a specific new output directory:
+
+```bash
+uv run --project benchmarks --no-sync python benchmarks/run_all.py \
+  --output benchmarks/artifacts/results-01 \
+  --cores 4 --runs 3 --timeout 3600
+```
+
+The wrapper produces `summary.md` alongside `report.json`. To use your own optional recordings instead, use the lower-level `run.py --audio-manifest PATH --output NEW_DIRECTORY`; its manifest is a JSON list of `{ "id": "sample", "path": "sample.ogg", "reference_german": "Actual German transcript" }` objects, with audio paths relative to that manifest.
 
 Each candidate runs sequentially in a fresh subprocess constrained to up to four available CPUs. A per-candidate timeout kills and reaps that subprocess; other candidates still run. Existing output directories are refused to protect evidence. Omit the audio manifest to run translation/TTS only, but the report marks ASR skipped and the command exits nonzero because the suite is incomplete.
 
@@ -53,7 +61,7 @@ The script records peak Linux process RSS and flags the 10 GiB inference budget.
 
 `report.json` records host/runtime information, the lockfile hash, model revisions, input hashes, model-load time, every inference duration, output text or WAV paths, audio duration, peak RSS, and errors. Each candidate's `stderr.log` captures dependency diagnostics. Run 0 of the first case is first inference after loading; subsequent runs are warm. Loading is a fresh-process measurement with cached weights, **not** a guaranteed cold operating-system disk cache. Real-time factor can be calculated as inference seconds divided by audio seconds.
 
-The suite includes six German text samples and an exact 1,000-character stress input. Inspect every translation against the supplied meaning references, and listen to the generated WAV files for all three voices. Compare ASR output against your human transcripts; the benchmark does not substitute string matching for quality judgment.
+The suite includes six German text samples and an exact 1,000-character stress input. Inspect every translation against the supplied meaning references, and listen to the generated WAV files for all three voices. Compare ASR output against the supplied reference transcripts; the benchmark does not substitute string matching for quality judgment.
 
 Complete this decision record after running:
 
@@ -61,7 +69,7 @@ Complete this decision record after running:
 |---|---|
 | Target hardware confirmed | Pending |
 | All dependencies install and providers execute | Pending |
-| Two-minute human recording transcribed without failure | Pending |
+| Two-minute assembled human-speech stress fixture transcribed without failure | Pending |
 | 1,000-character translation and all three TTS outputs complete | Pending |
 | Each inference process stays within 10 GiB RSS | Pending |
 | ASR quality accepted by owner | Pending |
@@ -80,4 +88,4 @@ Benchmark audio is deliberately retained for listening review, unlike production
 python3 -m unittest discover -s benchmarks/tests -v
 ```
 
-These tests exercise subprocess failure/timeout handling, event-loop responsiveness, repeat measurement, fixture boundaries, and input validation. They are not real-model benchmarks or bot acceptance tests.
+These tests exercise subprocess failure/timeout handling, event-loop responsiveness, repeat measurement, fixture boundaries, public-audio assembly, checksum verification, and input validation. They are not real-model benchmarks or bot acceptance tests.

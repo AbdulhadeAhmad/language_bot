@@ -9,7 +9,7 @@ Move each milestone through **Not started → In progress → Verification → D
 | Milestone | Status | Evidence / notes |
 |---|---|---|
 | M0 — Specification and tracking | Done | [30 acceptance scenarios](docs/acceptance_scenarios.md) cover ownership, duplicates, privacy, copying, editing, deletion, and review behavior; checked against the revised specification. |
-| M1 — Runtime and model feasibility | In progress | [Benchmark package and target-server runbook](benchmarks/README.md) prepared; isolated dependency lock generated. Harness tests pass. Target-server measurements, license review, and owner quality acceptance are pending. |
+| M1 — Runtime and model feasibility | In progress | [Benchmark package and target-server runbook](benchmarks/README.md) prepared; isolated dependency lock generated. Owner reports server dependencies and models installed. Public German speech fixtures downloaded and validated; one-command runner supplied. Target-server measurements, license review, and owner quality acceptance are pending. |
 | M2 — Async application foundation | Not started | |
 | M3 — Collections and duplicate warnings | Not started | |
 | M4 — Durable jobs and archive storage | Not started | |
@@ -341,14 +341,27 @@ Track each milestone as **Not started → In progress → Verification → Done*
 | 2026-11-03 | Prepare M1 benchmarks here for the owner to run on the target server. The development workspace reports 12 logical CPUs and approximately 23 GiB RAM, so it is not the target hardware. | Owner explicitly selected target-server benchmark preparation. |
 | 2026-11-03 | Use an isolated Python 3.12 benchmark environment with a dependency lock; evaluate faster-whisper base/small INT8, OPUS-MT, and three Piper voices. These are candidates, not final provider/runtime choices. | CPU feasibility investigation; application dependencies and Python pin remain unchanged pending M1 evidence. |
 
+| 2026-11-03 | Supply public German human-speech fixtures and a one-command benchmark runner; user recordings and manual manifests are no longer prerequisites. | Owner requested a complete ready-to-run benchmark after installing dependencies and preparing models. |
+
 ## 6. Execution log
 
 ### 2026-11-03 — M0 complete; M1 benchmark tooling prepared
 
 - Added `docs/acceptance_scenarios.md` with 30 observable scenarios mapped to milestones; reviewed them against the current ownership, duplicate-warning, provenance, privacy, and spoiler-flashcard rules.
 - Added isolated benchmark preparation, async subprocess orchestration, and provider experiments under `benchmarks/`. Models run sequentially with CPU affinity; reports capture load/inference timing, peak RSS, input/model identity, outputs, and errors. Downloads are separate from measured inference.
-- Added six representative German text fixtures plus an exact 1,000-character stress case. Human audio, including a two-minute recording, must be supplied on the target server; skipped ASR produces an incomplete suite, not a passing result.
+- Added six representative German text fixtures plus an exact 1,000-character stress case. Initially required user-supplied human audio; superseded by the public-fixture preparation below. Skipped ASR produces an incomplete suite, not a passing result.
 - Added the server runbook and quality-review checklist. Generated audio is retained only as ignored benchmark evidence for listening review, separate from production audio-lifecycle requirements.
 - Verification: `python3 -m unittest discover -s benchmarks/tests -v` passed 13 tests; CLI help and `git diff --check` passed. These are benchmark-tool tests, not real-model or application acceptance results.
 - Dependency resolution completed and produced `benchmarks/uv.lock`. Local installation failed during package downloads with a network timeout; provider imports and actual inference have not been verified. The server runbook includes installation and an import check before downloading model weights.
 - Remaining M1 work: run the locked environment and candidate models on the target server, inspect memory and latency, review model/voice licenses, listen to samples, and record final model/runtime decisions with owner acceptance. M2 has not started because M1 remains the agreed feasibility gate.
+
+### 2026-11-03 — Self-contained benchmark inputs and execution
+
+- Owner confirmed dependencies installed and `benchmarks/prepare.py` completed on the target server. No need to reinstall or redownload model weights for this update.
+- Added `prepare_audio.py`: downloads Google FLEURS German test speech from the original archive, pins its dataset revision, records attribution/checksums, and reuses verified local fixtures. The preview API was tested and failed; the implementation uses the original archive instead.
+- Downloaded and decoded six distinct human speech clips with dataset transcripts, plus an exact 120-second stress fixture assembled from complete utterances and silence. Verified all seven WAVs and manifest checksums. Dataset revision: `70bb2e84b976b7e960aa89f1c648e09c59f894dd`; license: CC-BY-4.0. No user recordings or manually written manifests are required.
+- Added `run_all.py`: reuses prepared models, prepares or verifies public audio, runs all candidates, and writes a readable summary beside the detailed report. A transfer ZIP contains the updated scripts and verified public fixtures, excluding model weights and server-specific model paths.
+- The assembled two-minute fixture tests duration/resource handling; it does not establish accuracy on continuous conversation or learner pronunciation. Personal recordings may be used later but are not required to execute M1 benchmarks.
+- Target-server model timings and owner quality approval remain pending; fixture validation does not complete M1.
+
+- Verification for this update: all 20 benchmark-tool tests passed; live public-audio preparation and cached checksum verification succeeded; the transfer archive was integrity-checked.
