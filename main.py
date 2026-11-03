@@ -1,6 +1,4 @@
-def main():
-    print("Hello from language-bot!")
-
+from app.main import run
 
 if __name__ == "__main__":
-    main()
+    run()
