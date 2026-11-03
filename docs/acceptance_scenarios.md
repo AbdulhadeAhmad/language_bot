@@ -1,6 +1,6 @@
 # Acceptance scenarios — M0 baseline
 
-These scenarios translate `implementation_plan.md` into observable outcomes. They are specifications, not claims that application tests already pass. Alice and Bob are allowlisted users; Eve is not. Each scenario starts from isolated data unless stated otherwise.
+These scenarios translate `implementation_plan.md` into observable outcomes. They are specifications, not claims that application tests already pass. Alice and Bob are approved users; Eve has no approved access. Each scenario starts from isolated data unless stated otherwise.
 
 | ID | Milestone | Given / action | Required outcome |
 |---|---|---|---|
@@ -44,3 +44,13 @@ These scenarios translate `implementation_plan.md` into observable outcomes. The
 - Translation recall uses spoiler flashcards; typed translation modes and source-change notifications remain future work.
 
 M0 is complete when these scenarios and the implementation plan agree. Later milestones turn applicable scenarios into executable checks and record actual results.
+
+## Admin approval and external deployment revision (M2)
+
+- First /start creates one private, pending record and one channel request; repeated and concurrent starts refresh profile without duplicate requests.
+- Only ADMIN_TELEGRAM_ID can open management actions or approve/reject through private or configured-channel callbacks. Forged and stale callbacks cannot alter access.
+- Grant by ID works before registration. Rejected/revoked users stay blocked after /start; restore works without deleting their data. The configured admin cannot be revoked.
+- Lists paginate; totals include preapproved records. Access transitions are audited. User notifications and channel edits fail independently of the committed decision.
+- Native AsyncTeleBot handler failure rolls back user mutation and every queued effect. Duplicate updates cannot duplicate effects.
+- Fresh Compose startup applies migrations and becomes ready on host loopback port 8060 only; database has no host port.
+- External configuration, users, models, and benchmark evidence survive container recreation from a different checkout. Source artifact migration verifies checksums and retains originals.

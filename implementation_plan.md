@@ -9,8 +9,8 @@ Move each milestone through **Not started → In progress → Verification → D
 | Milestone | Status | Evidence / notes |
 |---|---|---|
 | M0 — Specification and tracking | Done | [30 acceptance scenarios](docs/acceptance_scenarios.md) cover ownership, duplicates, privacy, copying, editing, deletion, and review behavior; checked against the revised specification. |
-| M1 — Runtime and model feasibility | In progress | [First server-run findings](docs/benchmark_findings_20261103.md): translation and three TTS voices completed. PyAV incompatibility repaired in the lock; ASR rerun pending. [Round-two commands](benchmarks/README.md) compare six Piper variants and three Qwen3-TTS 0.6B speakers over 27 inputs. Quality, license review, and final selection remain pending. |
-| M2 — Async application foundation | Not started | |
+| M1 — Runtime and model feasibility | In progress | [First server-run findings](docs/benchmark_findings_20261103.md): translation and three TTS voices completed. ASR rerun passed; [second-run findings](docs/benchmark_findings_20261104.md) compare accuracy and expanded TTS performance. [Round-two commands](benchmarks/README.md) compare six Piper variants and three Qwen3-TTS 0.6B speakers over 27 inputs. Quality, license review, and final selection remain pending. |
+| M2 — Async application foundation | Done | Admin approval revision verified: 13 unit + 19 PostgreSQL integration tests; uv image built, fresh Compose readiness and external-data persistence across checkout relocation passed. [Operations](docs/operations.md). |
 | M3 — Collections and duplicate warnings | Not started | |
 | M4 — Durable jobs and archive storage | Not started | |
 | M5 — Voice and text capture | Not started | |
@@ -22,11 +22,11 @@ Move each milestone through **Not started → In progress → Verification → D
 
 ## 1. Agreed product behavior
 
-The first release supports one or two allowlisted users, with independent sentence collections, public discovery, audio management, and spaced repetition.
+The first release supports administrator-approved users, with independent sentence collections, public discovery, audio management, and spaced repetition.
 
 | Area | Agreed behavior |
 |---|---|
-| Access | Administrator-managed Telegram user allowlist |
+| Access | Database-backed registration and approval through /admin; ADMIN_TELEGRAM_ID is the single protected admin; requests go to ADMIN_NOTIFICATION_CHANNEL_ID. |
 | Privacy | New users start private. Private mode hides all their entries from other users. |
 | Public entries | Show German, English, generated audio, and original recordings, without contributor identity |
 | Discovery | Search German/English, random browsing, and latest public entries |
@@ -111,7 +111,7 @@ All public reads—including playback and callbacks from old discovery messages�
 
 ## 3. Trackable implementation milestones
 
-Each milestone closes only when its acceptance checks pass. Implement milestones in order; milestone 1 is a deliberate feasibility gate before choosing model packages.
+Each milestone closes only when its acceptance checks pass. M1 benchmarking continues in parallel with application development, as authorized by the owner. Use replaceable provider interfaces and provisional lightweight candidates; final model quality and license approval remain required before release.
 
 ### [x] M0 — Lock the specification and project tracking
 
@@ -143,20 +143,20 @@ Each milestone closes only when its acceptance checks pass. Implement milestones
 - The project owner listens to the voice samples and accepts transcription/translation quality.
 - If no candidate meets the hardware or quality requirements, resolve that constraint before proceeding.
 
-### [ ] M2 — Establish the async application foundation
+### [x] M2 — Establish the async application foundation
 
 **Deliverables**
 
 - Docker Compose services, dependency lockfile, environment configuration, and Alembic migrations.
 - Async SQLAlchemy session management and provider dependency injection.
 - FastAPI health/readiness endpoints and secret-validated Telegram webhook.
-- Allowlist enforcement and durable incoming-update storage.
+- Database-backed registration, channel approval, admin controls, and durable incoming-update storage.
 - Structured logs with user, entry, job, and operation IDs.
 
 **Acceptance**
 
 - A fresh deployment migrates and starts successfully.
-- Invalid webhook secrets and unauthorized users cannot create application work.
+- Invalid webhook secrets cannot create work; pending/rejected/revoked users can only use registration/status flows, never protected application workflows.
 - Repeated delivery of one Telegram update produces one logical operation.
 - Health distinguishes a running process from a database-ready application.
 
@@ -390,3 +390,35 @@ Track each milestone as **Not started → In progress → Verification → Done*
 - Added twenty German pronunciation/usage fixtures for a total of 27 inputs. Two repetitions over nine TTS configurations produce up to 486 WAVs. The 1,000-character stress input stays unchanged for comparison with round one.
 - Added an offline HTML listening comparison, scoring CSV, warning counts, installed-package evidence, and checkpoint/log preservation on timeout. Original server reports and samples remain unchanged.
 - Verification: 33 offline tests passed, covering model reuse, candidate selection, CPU Qwen adapter calls, ASR lazy inference/scoring, HTML escaping/portable audio links, and timeout evidence recovery. Both dependency locks pass offline consistency checks. These do not claim actual Qwen inference or server ASR success; those measurements and owner quality approval are pending.
+
+### 2026-11-03 — M2 implemented; deployment verification remains
+
+- Added the Python 3.12 application dependency lock, async FastAPI application, SQLAlchemy/asyncpg sessions, Alembic migrations, configuration validation, structured logging, and Docker Compose services.
+- Added secret-validated, allowlisted private-chat webhook intake. Updates are committed before acknowledgment, deduplicated by Telegram update ID, and processed by separate interaction and delivery workers.
+- Added transactional response enqueueing, concurrent worker claiming, rate-limit retry, and explicit uncertain-delivery handling after timeout or worker loss. Ambiguous Telegram sends are not automatically resent.
+- Added async ASR, translation, TTS, and media interfaces with deterministic test doubles. Provisional settings use Whisper base, OPUS-MT, and Piper; production inference adapters and final model choices remain pending.
+- Verification: 10 unit tests and 12 integration tests passed against disposable PostgreSQL 16, including concurrent duplicate intake, transaction rollback, access revocation, delivery recovery, and migration downgrade/upgrade and schema comparison. Ruff and Compose configuration validation passed.
+- Unit tests required execution outside the restricted sandbox because its thread-notification restrictions stalled asyncio.to_thread; the unrestricted run passed. The initial PostgreSQL image download timed out; retry succeeded and integration tests completed.
+- Remaining before M2 closes: build the application Docker image and smoke-test a fresh Compose deployment; finish operational documentation. No live Telegram webhook was registered. Current replies are foundation placeholders; sentence capture, collections, discovery, and reviews are later milestones.
+
+### 2026-11-04 — Second server results inspected
+
+- Recorded detailed findings in [second-run findings](docs/benchmark_findings_20261104.md). Both ASR models now complete; six-clip pooled WER is 15.4% for base and 7.7% for small. Two-minute warm medians are 45.41 and 50.47 seconds.
+- Verified all 486 expanded-TTS WAV checksums and durations. Thorsten medium has no warnings and a 0.23-second warm median; four other Piper voices each emit 144 identical missing-phoneme warnings. Qwen completes but takes 9.5–10.6 minutes for the longest input on this CPU.
+- Listening scores remain blank. M1 remains in progress pending quality/license approval and final voice selection. Preserve provisional application settings; stronger candidate recommendations are recorded without treating them as approved model choices.
+
+### 2026-11-04 — Admin approval and external deployment revision
+
+- Replaced environment allowlisting with persistent pending/approved/rejected/revoked users, a protected single admin, approval channel callbacks, preapproval by ID, paginated lists/counts, and an access-change audit trail. Repeated starts and stale buttons do not repeat requests/decisions.
+- Replaced Telegram Pydantic wrappers with native telebot types and AsyncTeleBot handlers. Kept durable intake, transaction rollback, and multi-action outbox delivery; user status notifications remain deliverable after rejection/revocation.
+- Adopted the uv Python 3.12 image, host-only 127.0.0.1:8060, stable Compose naming, and external bind-mounted database/configuration/runtime storage. Added environment setup and artifact migration tools plus the operations runbook.
+- Existing local benchmark artifacts copied to `/home/abdulhade/language_bot_data`: 585 files verified, originals retained. Runtime manifests are relocated while historical reports retain original measurement paths.
+- Verification in progress: initial revised suites passed 10 unit, 17 PostgreSQL integration, and 33 benchmark-tool tests. Additional storage/notification tests and final deployment/recreation checks follow before closing M2.
+
+### 2026-11-04 — M2 revision verified and complete
+
+- Final application checks: 13 unit tests and 19 real-PostgreSQL integration tests passed; benchmark regression suite: 33 tests passed. Ruff and whitespace checks passed. Default pytest discovery also works; database tests skip unless an explicit disposable test database is supplied.
+- Built `ghcr.io/astral-sh/uv:python3.12-bookworm-slim` application images. Fresh Compose deployment applied both migrations, started both workers, and returned ready at `127.0.0.1:8060`; PostgreSQL had no published host port.
+- Rebuilt/recreated the isolated deployment from `/tmp/language-bot-relocated-checkout` with the same external data root. Approved user record, configuration checksum, and model marker survived. Confirmed worker startup and readiness, then stopped the test deployment.
+- Installed the external development environment at `/home/abdulhade/language_bot_data/venvs/app`; cache reuse resolved stalled downloads. External `.env` contains setup placeholders, not live bot credentials. Original repository artifacts/environments remain as retained copies; new documented workflows use the external root.
+- Live Telegram registration and channel delivery were not attempted with placeholder credentials. Follow [operations](docs/operations.md) for channel rights, configuration, nginx, and webhook registration. No M3 sentence features or new model experiments were started.
