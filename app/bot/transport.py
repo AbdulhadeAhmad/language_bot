@@ -15,6 +15,10 @@ class RejectedDelivery(Exception):
     """Telegram explicitly rejected the operation."""
 
 
+class MissingStatusMessage(RejectedDelivery):
+    """The known status message was deleted or can no longer be edited."""
+
+
 class TelegramTransport(Protocol):
     async def send(self, method: str, payload: dict) -> int | None: ...
     async def close(self) -> None: ...
@@ -48,6 +52,15 @@ class BotTransport:
                 and "message is not modified" in exc.description.lower()
             ):
                 return payload.get("message_id")
+            if (
+                method == "edit_message_text"
+                and exc.error_code == 400
+                and any(
+                    value in exc.description.lower()
+                    for value in ("message to edit not found", "message can't be edited")
+                )
+            ):
+                raise MissingStatusMessage("Status message unavailable") from None
             if exc.error_code == 429:
                 seconds = exc.result_json.get("parameters", {}).get("retry_after", 1)
                 raise RetryAfter(int(seconds)) from None

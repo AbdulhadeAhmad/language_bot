@@ -112,3 +112,52 @@ async def test_network_retry_keeps_successful_previous_stage(db, config):
     async with db.sessions() as session:
         row = await session.scalar(select(Operation))
         assert row.german == "Guten Morgen." and row.step == "translate" and row.state == "pending"
+
+
+async def test_long_voice_result_keeps_full_text_and_offers_owner_only_retrieval(db, config):
+    class Long(FakeModels):
+        async def transcribe(self, operation, transport):
+            return "Guten Morgen. " * 200
+
+        async def translate(self, operation):
+            return "Good morning. " * 200
+
+    transport = RecordingTransport()
+    await dispatch(db, config, transport, payload(voice=VOICE))
+    runner = OperationRunner(db, config, transport, Long())
+    for _ in range(3):
+        await runner.process_one()
+    final = transport.sent[-1][1]["text"]
+    assert len(final) < 4096 and "Full text: /result " in final
+    async with db.sessions() as session:
+        row = await session.scalar(select(Operation))
+        operation_id = row.id
+        assert row.state == "done" and len(row.german) > 1000 and len(row.english) > 2500
+    before = len(transport.sent)
+    await dispatch(db, config, transport, payload(2, text=f"/result {operation_id}"))
+    assert (
+        "".join(data["text"] for _, data in transport.sent[before:])
+        == f"German:\n{row.german}\n\nEnglish:\n{row.english}"
+    )
+    async with db.sessions.begin() as session:
+        session.add(User(id=22, status="approved"))
+    await dispatch(db, config, transport, payload(3, user=22, text=f"/result {operation_id}"))
+    assert "No completed operation" in transport.sent[-1][1]["text"]
+
+
+async def test_deleted_status_requires_replacement_only_on_explicit_retry(db, config):
+    from app.bot.transport import MissingStatusMessage
+
+    transport = RecordingTransport()
+    await dispatch(db, config, transport, payload(text="Hallo"))
+    transport.error = MissingStatusMessage()
+    runner = OperationRunner(db, config, transport, FakeModels())
+    await runner.process_one()
+    async with db.sessions() as session:
+        row = await session.scalar(select(Operation))
+        operation_id = row.id
+        assert row.state == "failed" and row.status_message_id is None
+    transport.error = None
+    await dispatch(db, config, transport, payload(2, text=f"/retry {operation_id}"))
+    async with db.sessions() as session:
+        assert (await session.get(Operation, operation_id)).status_message_id is not None

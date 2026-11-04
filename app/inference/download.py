@@ -4,9 +4,22 @@ import argparse
 import json
 import os
 import shutil
+import time
 from pathlib import Path
 
+import requests
 from huggingface_hub import hf_hub_download, snapshot_download
+
+
+def download_with_retry(function, *args, **kwargs):
+    for attempt in range(3):
+        try:
+            return function(*args, **kwargs)
+        except (requests.RequestException, OSError) as exc:
+            if attempt == 2:
+                raise
+            print(f"Download interrupted ({type(exc).__name__}); resuming cached files", flush=True)
+            time.sleep(2 ** (attempt + 1))
 
 
 def main():
@@ -39,7 +52,8 @@ def main():
             continue
         model = models[name]
         print(f"Preparing {name}: {model['repository']}", flush=True)
-        snapshot_download(
+        download_with_retry(
+            snapshot_download,
             model["repository"],
             revision=model["revision"],
             local_dir=root / name,
@@ -51,7 +65,9 @@ def main():
         directory.mkdir(exist_ok=True)
         prefix = "de/de_DE/thorsten/medium/"
         for name in ("de_DE-thorsten-medium.onnx", "de_DE-thorsten-medium.onnx.json", "MODEL_CARD"):
-            source = hf_hub_download(model["repository"], prefix + name, revision=model["revision"])
+            source = download_with_retry(
+                hf_hub_download, model["repository"], prefix + name, revision=model["revision"]
+            )
             shutil.copyfile(source, directory / name)
     for name in args.only:
         (root / name / "runtime-provenance.json").write_text(

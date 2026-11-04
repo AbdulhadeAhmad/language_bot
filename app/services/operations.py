@@ -9,6 +9,7 @@ from uuid import uuid4
 from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 
+from app.bot.transport import MissingStatusMessage
 from app.db.models import Operation, User
 
 logger = logging.getLogger(__name__)
@@ -195,11 +196,17 @@ class OperationRunner:
                     await self.render(row, result)
                     await self.finish(row, state="done", error_type=None)
         except Exception as exc:
-            permanent = isinstance(exc, ValueError) or row.attempts >= 3
+            permanent = isinstance(exc, (ValueError, MissingStatusMessage)) or row.attempts >= 3
             state = "failed" if permanent else "pending"
             delay = getattr(exc, "seconds", min(60, 2**row.attempts))
+            reset_status = (
+                {"status_message_id": None, "status_send_state": "missing"}
+                if isinstance(exc, MissingStatusMessage)
+                else {}
+            )
             finished = await self.finish(
                 row,
+                **reset_status,
                 state=state,
                 error_type=type(exc).__name__[:100],
                 available_at=func.now() + timedelta(seconds=delay),
