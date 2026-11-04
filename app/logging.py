@@ -1,5 +1,6 @@
 import json
 import logging
+import socket
 from datetime import UTC, datetime
 from logging.handlers import RotatingFileHandler
 
@@ -36,7 +37,9 @@ def configure_logging(level: str) -> None:
     import os
 
     file_handler = RotatingFileHandler(
-        directory / f"app-{os.getpid()}.jsonl", maxBytes=5_000_000, backupCount=3
+        directory / f"app-{socket.gethostname()}-{os.getpid()}.jsonl",
+        maxBytes=5_000_000,
+        backupCount=3,
     )
     file_handler.setFormatter(JsonFormatter())
     logging.basicConfig(level=level, handlers=[handler, file_handler], force=True)

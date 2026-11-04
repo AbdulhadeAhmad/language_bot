@@ -18,17 +18,14 @@ class Settings(BaseSettings):
     admin_telegram_id: int = Field(gt=0)
     admin_notification_channel_id: int = Field(lt=0)
     telegram_media_channel_id: int | None = None
-    asr_provider: str = "faster_whisper"
-    asr_model: str = "base"
-    translation_provider: str = "opus_mt"
-    translation_model: str = "Helsinki-NLP/opus-mt-de-en"
-    tts_provider: str = "piper"
-    german_tts_voices: str = "de_DE-eva_k-x_low,de_DE-karlsson-low,de_DE-thorsten-medium"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     worker_poll_seconds: float = Field(default=0.5, gt=0, le=60)
-    delivery_timeout_seconds: int = Field(default=20, ge=1, le=60)
-    delivery_lease_seconds: int = Field(default=90, ge=75, le=600)
-    delivery_max_attempts: int = Field(default=5, ge=1, le=20)
+    telegram_timeout_seconds: int = Field(default=15, ge=1, le=60)
+    asr_url: str = "http://asr:8080"
+    translation_url: str = "http://translation:8080"
+    tts_url: str = "http://tts:8080"
+    operation_concurrency: int = Field(default=4, ge=1, le=16)
+    operation_timeout_seconds: int = Field(default=900, ge=10)
 
     @field_validator("database_url")
     @classmethod

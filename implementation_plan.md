@@ -10,10 +10,10 @@ Move each milestone through **Not started → In progress → Verification → D
 |---|---|---|
 | M0 — Specification and tracking | Done | [30 acceptance scenarios](docs/acceptance_scenarios.md) cover ownership, duplicates, privacy, copying, editing, deletion, and review behavior; checked against the revised specification. |
 | M1 — Runtime and model feasibility | In progress | [First server-run findings](docs/benchmark_findings_20261103.md): translation and three TTS voices completed. ASR rerun passed; [second-run findings](docs/benchmark_findings_20261104.md) compare accuracy and expanded TTS performance. [Round-two commands](benchmarks/README.md) compare six Piper variants and three Qwen3-TTS 0.6B speakers over 27 inputs. Quality, license review, and final selection remain pending. |
-| M2 — Async application foundation | Done | Admin approval revision verified: 13 unit + 19 PostgreSQL integration tests; uv image built, fresh Compose readiness and external-data persistence across checkout relocation passed. [Operations](docs/operations.md). |
+| M2 — Async application foundation | Verification | Direct webhook/command handling replaces the inbox/outbox workers. Refactor tests pass; final container verification in progress. [Operations](docs/operations.md). |
 | M3 — Collections and duplicate warnings | Not started | |
-| M4 — Durable jobs and archive storage | Not started | |
-| M5 — Voice and text capture | Not started | |
+| M4 — Durable jobs and archive storage | In progress | Domain operations and three model-service queues implemented. Telegram archive lifecycle remains future work. |
+| M5 — Voice and text capture | In progress | German voice/text → translation pipeline implemented with one status message. Library integration, duplicate warnings, and archive handling remain. Bot audio generation/playback deferred. |
 | M6 — Editing and deletion | Not started | |
 | M7 — Privacy, discovery, and copying | Not started | |
 | M8 — Practice and FSRS | Not started | |
@@ -55,17 +55,15 @@ Private mode prevents future discovery and access through the bot. Previously sa
 
 Use **FastAPI, SQLAlchemy async, Pydantic, and pyTelegramBotAPI’s `AsyncTeleBot`**, packaged with Docker Compose.
 
-Run these separate processes:
+Run these services:
 
-- **API:** receive authenticated Telegram webhooks and provide health/readiness endpoints.
-- **Interaction worker:** process durable incoming updates, handle commands and callbacks, and send UI responses.
-- **Processing worker:** execute durable sentence-processing jobs, with one CPU inference operation at a time.
-- **Maintenance worker:** deliver reminders, refresh pending status messages, recover expired jobs, and clean temporary files.
-- **PostgreSQL:** store application data, interaction state, jobs, and delivery work.
+- **API:** authenticated Telegram webhook, direct AsyncTeleBot command/reply handling, health endpoints, and an async runner for durable capture operations.
+- **ASR / translation / TTS:** separate private HTTP services, each owning a PostgreSQL-backed inference queue and one CPU consumer. Model inference runs outside the HTTP event loop.
+- **PostgreSQL:** users, domain state, processing operations, and model jobs. Never store raw incoming Telegram update payloads or generic command-delivery work.
 
-Use async database and Telegram I/O. Run blocking model inference outside the event loop in a bounded executor owned by the processing worker. Configure model thread counts and memory usage from benchmarks.
+A voice capture persists only IDs/references and required step data. The bot immediately sends one status message; the operation progresses through transcription → translation → completed German/English text, updating that same message. TTS is built and available internally; bot audio generation/playback is deferred by owner choice.
 
-Each concurrent task gets its own SQLAlchemy session; transactions remain short and never span model inference or Telegram requests. This follows [SQLAlchemy’s async session guidance](https://docs.sqlalchemy.org/en/20/orm/extensions/asyncio.html). Heavy computation belongs in separate workers rather than request-local background tasks, consistent with [FastAPI’s guidance](https://fastapi.tiangolo.com/tutorial/background-tasks/).
+Each task uses its own async SQLAlchemy session. Transactions stay short and do not span network or model calls. Model-service jobs and capture operations have leases, heartbeats, retry limits, and fenced result writes. Retries use stable model request IDs; manual operation retry starts a new request generation. Only the bot API has outward networking; model APIs are Docker-network-only.
 
 ### Core records
 
@@ -80,7 +78,7 @@ Each concurrent task gets its own SQLAlchemy session; transactions remain short 
 | `ReviewAttempt` | Self-grade and scheduling history, with an optional submitted answer for modes that collect one; translation flashcards do not collect an answer |
 | `ReviewSession` | Current question and session progress |
 | `InteractionState` | Pending text edit or replacement recording |
-| `IncomingUpdate` / `Job` | Deduplicated Telegram updates and durable background work |
+| `Operation` / `ModelJob` | Domain capture progress and durable per-model inference jobs; no raw Telegram updates |
 
 Each `Sentence` belongs directly to one user; there is no separate `UserSentence` model or association table. Audio assets, review cards, and entry-specific jobs reference `Sentence.id`. Copying creates a new `Sentence` owned by the recipient, with independent text, metadata, and review state; generated media can still be shared through `StoredMedia` references.
 
@@ -91,7 +89,7 @@ Database constraints enforce:
 - No global or per-user uniqueness constraint on German text or its normalized lookup value. Each intentional submission or copy creates a separate user-owned `Sentence` record.
 - One active generated asset per personal entry and configured voice.
 - One review card per personal entry and mode.
-- Unique processing identities for Telegram updates and retryable work.
+- Unique capture identities by chat/source message ID and stable model-job IDs; no content uniqueness constraints.
 
 For duplicate detection, normalize German using Unicode NFC, trim leading/trailing whitespace, and collapse internal whitespace. Preserve capitalization, punctuation, umlauts, and spelling. Index the lookup value without a uniqueness constraint.
 
@@ -143,21 +141,21 @@ Each milestone closes only when its acceptance checks pass. M1 benchmarking cont
 - The project owner listens to the voice samples and accepts transcription/translation quality.
 - If no candidate meets the hardware or quality requirements, resolve that constraint before proceeding.
 
-### [x] M2 — Establish the async application foundation
+### [ ] M2 — Establish the async application foundation
 
 **Deliverables**
 
 - Docker Compose services, dependency lockfile, environment configuration, and Alembic migrations.
 - Async SQLAlchemy session management and provider dependency injection.
 - FastAPI health/readiness endpoints and secret-validated Telegram webhook.
-- Database-backed registration, channel approval, admin controls, and durable incoming-update storage.
+- Database-backed registration, channel approval, and admin controls handled directly in the API; no raw Telegram payload storage.
 - Structured logs with user, entry, job, and operation IDs.
 
 **Acceptance**
 
 - A fresh deployment migrates and starts successfully.
 - Invalid webhook secrets cannot create work; pending/rejected/revoked users can only use registration/status flows, never protected application workflows.
-- Repeated delivery of one Telegram update produces one logical operation.
+- Repeated delivery of one capture produces one domain operation identified by chat and source message ID.
 - Health distinguishes a running process from a database-ready application.
 
 ### [ ] M3 — Implement personal collections and duplicate warnings
@@ -200,18 +198,18 @@ Each milestone closes only when its acceptance checks pass. M1 benchmarking cont
 
 **Deliverables**
 
-- Voice flow: archive → transcribe → normalize/check for duplicates → translate → generate three voices → archive.
-- Text flow: normalize/check for duplicates → translate → generate three voices → archive.
+- Current voice flow: transcribe → translate → show both texts in the original status message. Archive/library/duplicate-warning integration remains to be implemented.
+- Current text flow: translate → show both texts. TTS is independently available through its private API; bot audio generation/playback is deferred.
 - One editable processing-status message with management controls.
 - Step-specific failure information and retry actions.
 - Maximum input length/duration enforcement.
 
 **Acceptance**
 
-- Both input types produce persisted German, English, and three playable generated recordings.
+- Both input types produce persisted German/English operation results and one updated status message. Generated audio is deferred.
 - Voice entries also retain their original recording.
 - Playback reuses Telegram references.
-- A failed voice does not discard successful translation or other voices.
+- A failed step does not discard successful earlier results.
 - Duplicate input creates a separate entry and shows an advisory warning when detected, without changing existing entries.
 - Two users can submit work and continue using settings, discovery, and saved-entry controls while processing runs. Verify discovery controls once M7 is available.
 
@@ -322,7 +320,7 @@ Each milestone closes only when its acceptance checks pass. M1 benchmarking cont
 Use three test layers:
 
 - **Unit tests:** normalization, advisory duplicate detection and warning rendering, dependency invalidation, rendering, access rules, and review scheduling with a controlled clock.
-- **PostgreSQL integration tests:** concurrent intentional duplicate creation versus idempotent delivery retries, privacy-filtered duplicate lookup, job leasing, retries, revision conflicts, media references, and transactional enqueueing. Use real PostgreSQL rather than SQLite.
+- **PostgreSQL integration tests:** capture redelivery deduplication, domain and model-job leases/recovery, native admin transactions, and durable results. Extend these to collection privacy, duplicate warnings, revisions, and media references in their milestones. Use real PostgreSQL rather than SQLite.
 - **Telegram acceptance tests:** actual archive/playback behavior, editable status messages, anonymous discovery, privacy transitions, and two-user isolation.
 
 Routine automated tests use deterministic fake model and Telegram adapters. Real model benchmarks and live Telegram tests run at their designated milestones.
@@ -427,3 +425,10 @@ Track each milestone as **Not started → In progress → Verification → Done*
 
 - Compose now defaults directly to `$HOME/language_bot_data` and loads the external `.env` for every service, including PostgreSQL. No wrapper, shell sourcing, or `--env-file` flag is required for ordinary deployment commands.
 - `LANGUAGE_BOT_DATA_DIR` remains an optional shell override. Updated operational commands to plain `docker compose`; retained the old wrapper as a compatibility alias.
+
+### 2026-11-04 — Direct bot API and durable model operations (in progress)
+
+- Owner replaced raw-update persistence and generic interaction/delivery workers with direct API handling plus durable domain operations. Three model containers are implemented: Whisper small, OPUS-MT de→en, Piper Thorsten medium. Their queues live in PostgreSQL; model files and job artifacts remain outside the repo.
+- Voice/text capture now advances through transcription (voice only), translation, and a final edit showing both texts. Owner explicitly deferred generated audio/playback in bot responses; TTS's internal API is implemented independently.
+- Added an irreversible upgrade migration preserving user approvals, audit records, and channel references while removing old inbox/outbox payload tables. Backup instructions are in the operations guide.
+- Verification underway: initial unit and integration suites passed; final migration, cleanup, image build, and service smoke checks are pending before completion is recorded.

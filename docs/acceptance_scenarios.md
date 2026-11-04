@@ -9,7 +9,7 @@ These scenarios translate `implementation_plan.md` into observable outcomes. The
 | A03 | M3 | Alice intentionally sends identical German twice in different updates; Bob sends it too. | Three independently owned sentences. Detected accessible matches produce a small warning, never rejection or automatic merging. |
 | A04 | M3 | Compare `Ich  komme.` and ` Ich komme. `, composed/decomposed umlauts, `ich komme.`, and `Ich komme!`. | Whitespace and Unicode-equivalent forms match; case and punctuation differences do not. |
 | A05 | M3, M7 | Bob privately saves text that Alice later submits. | Alice gets no indication that Bob's private sentence exists. |
-| A06 | M5 | Alice submits text; Bob submits a voice note. | Independent persisted records, translations, three generated voices, and one edited progress message each; Bob also has an archived original. |
+| A06 | M5 | Alice submits text; Bob submits a voice note. | Independent persisted German/English operation results and one edited progress message each. Bot audio and archive/library integration are deferred. |
 | A07 | M5 | One generated voice fails; translation or ASR fails in separate cases. | Successful work remains saved; retry only the failed work. No false READY status. |
 | A08 | M4, M5 | Inference is busy while the other user opens settings or a saved entry. | Interaction handling remains responsive and is not awaiting inference. |
 | A09 | M5 | Submit 1,000/1,001 characters and voice notes of 120/121 seconds. | Boundary inputs are accepted; over-limit inputs are rejected before expensive work. |
@@ -51,6 +51,15 @@ M0 is complete when these scenarios and the implementation plan agree. Later mil
 - Only ADMIN_TELEGRAM_ID can open management actions or approve/reject through private or configured-channel callbacks. Forged and stale callbacks cannot alter access.
 - Grant by ID works before registration. Rejected/revoked users stay blocked after /start; restore works without deleting their data. The configured admin cannot be revoked.
 - Lists paginate; totals include preapproved records. Access transitions are audited. User notifications and channel edits fail independently of the committed decision.
-- Native AsyncTeleBot handler failure rolls back user mutation and every queued effect. Duplicate updates cannot duplicate effects.
+- Native AsyncTeleBot handler failure rolls back domain changes before direct replies. Capture redelivery cannot create duplicate operations; raw Telegram updates and generic deliveries are not stored.
 - Fresh Compose startup applies migrations and becomes ready on host loopback port 8060 only; database has no host port.
 - External configuration, users, models, and benchmark evidence survive container recreation from a different checkout. Source artifact migration verifies checksums and retains originals.
+
+## Durable operation and private model-service refactor
+
+- A voice submission immediately receives a Transcribing status reply. Only identifiers, Telegram file reference, current step, results, and recovery state enter PostgreSQL.
+- Transcription and translation update the same message, ending with German and English only. Other commands remain responsive during inference.
+- Restarting the API resumes pending steps; restarting a model service recovers its expired lease. Late results from old claim tokens cannot overwrite current results.
+- Model APIs accept stable job IDs, return existing results for identical retries, reject conflicting inputs, and apply bounded admission using PostgreSQL.
+- Model ports are not published; services join only the internal Docker network. TTS produces a WAV through its internal API but is not called by the bot yet.
+- Upgrading removes the raw inbox/outbox while preserving user approvals, access audit records, and known approval-message IDs.

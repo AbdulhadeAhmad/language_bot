@@ -6,6 +6,7 @@ def parse_update(payload: dict) -> Update:
         not isinstance(payload, dict)
         or type(payload.get("update_id")) is not int
         or payload["update_id"] < 0
+        or (payload.get("message") is not None and payload.get("callback_query") is not None)
     ):
         raise ValueError("Invalid update ID")
     return Update.de_json(payload)

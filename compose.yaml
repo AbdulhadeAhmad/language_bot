@@ -1,8 +1,10 @@
 name: language-bot
 x-app: &app
-  build: .
+  build:
+    context: .
+    target: api
   env_file: ${LANGUAGE_BOT_DATA_DIR:-${HOME}/language_bot_data}/.env
-  environment:
+  environment: &app-env
     LANGUAGE_BOT_DATA_DIR: /data
     TMPDIR: /data/tmp
     XDG_CACHE_HOME: /data/cache
@@ -15,6 +17,32 @@ x-app: &app
   depends_on:
     migrate:
       condition: service_completed_successfully
+x-model: &model
+  build:
+    context: .
+    target: inference
+  env_file: ${LANGUAGE_BOT_DATA_DIR:-${HOME}/language_bot_data}/.env
+  environment: &model-env
+    LANGUAGE_BOT_DATA_DIR: /data
+    TMPDIR: /data/tmp
+    MODEL_DIR: /models/runtime
+    MODEL_THREADS: 1
+  volumes:
+    - ${LANGUAGE_BOT_DATA_DIR:-${HOME}/language_bot_data}/models:/models:ro
+    - ${LANGUAGE_BOT_DATA_DIR:-${HOME}/language_bot_data}/jobs:/data/jobs
+    - ${LANGUAGE_BOT_DATA_DIR:-${HOME}/language_bot_data}/tmp:/data/tmp
+  networks: [models]
+  init: true
+  restart: unless-stopped
+  depends_on:
+    migrate:
+      condition: service_completed_successfully
+  healthcheck:
+    test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health/ready', timeout=4)"]
+    interval: 15s
+    timeout: 5s
+    retries: 5
+    start_period: 120s
 services:
   db:
     image: postgres:16-bookworm
@@ -24,6 +52,7 @@ services:
       POSTGRES_DB: language_bot
     volumes:
       - ${LANGUAGE_BOT_DATA_DIR:-${HOME}/language_bot_data}/postgres:/var/lib/postgresql/data
+    networks: [models]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U language_bot -d language_bot"]
       interval: 5s
@@ -31,15 +60,24 @@ services:
       retries: 20
     restart: unless-stopped
   migrate:
-    build: .
+    build:
+      context: .
+      target: api
     env_file: ${LANGUAGE_BOT_DATA_DIR:-${HOME}/language_bot_data}/.env
     command: ["alembic", "upgrade", "head"]
+    networks: [models]
     depends_on:
       db:
         condition: service_healthy
     restart: "no"
   api:
     <<: *app
+    environment:
+      <<: *app-env
+      ASR_URL: http://asr:8080
+      TRANSLATION_URL: http://translation:8080
+      TTS_URL: http://tts:8080
+    networks: [default, models]
     ports:
       - "127.0.0.1:8060:8060"
     healthcheck:
@@ -47,9 +85,38 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-  interaction-worker:
-    <<: *app
-    command: ["language-bot-worker", "--role", "interactions"]
-  delivery-worker:
-    <<: *app
-    command: ["language-bot-worker", "--role", "deliveries"]
+  asr:
+    <<: *model
+    environment:
+      <<: *model-env
+      MODEL_KIND: asr
+  translation:
+    <<: *model
+    environment:
+      <<: *model-env
+      MODEL_KIND: translation
+  tts:
+    <<: *model
+    environment:
+      <<: *model-env
+      MODEL_KIND: tts
+  prepare-models:
+    build:
+      context: .
+      target: inference
+    profiles: [setup]
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
+    environment:
+      HF_HUB_OFFLINE: "0"
+      TRANSFORMERS_OFFLINE: "0"
+      HF_HOME: /models/hub-cache
+      HF_HUB_DISABLE_XET: "1"
+      HF_HUB_DOWNLOAD_TIMEOUT: "60"
+      HF_HUB_ETAG_TIMEOUT: "15"
+      MODEL_DIR: /models/runtime
+    volumes:
+      - ${LANGUAGE_BOT_DATA_DIR:-${HOME}/language_bot_data}/models:/models
+    command: ["python", "-m", "app.inference.download"]
+networks:
+  models:
+    internal: true

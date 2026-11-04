@@ -5,7 +5,7 @@ from sqlalchemy.dialects.postgresql import insert
 from telebot.async_telebot import AsyncTeleBot
 from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-from app.db.models import AccessChange, IncomingUpdate, TelegramDelivery, User
+from app.db.models import AccessChange, User
 
 
 class PropagateErrors:
@@ -14,10 +14,11 @@ class PropagateErrors:
 
 
 class Handlers:
-    """One dispatch per transaction: handlers enqueue effects, never perform network I/O."""
+    """Native handlers make short database changes; the API sends replies after commit."""
 
     def __init__(self, session, settings, incoming):
         self.session, self.settings, self.incoming = session, settings, incoming
+        self.effects = []
         self.bot = AsyncTeleBot(
             settings.telegram_bot_token.get_secret_value(), exception_handler=PropagateErrors()
         )
@@ -30,23 +31,22 @@ class Handlers:
             content_types=["text", "voice", "audio", "document", "photo", "video", "sticker"],
         )
 
-    def queue(self, key, method, payload, audience="status", user_id=None):
-        self.session.add(
-            TelegramDelivery(
-                update_id=self.incoming.update_id,
-                action_key=key,
-                actor_id=user_id or self.incoming.actor_id,
-                audience=audience,
-                method=method,
-                payload=payload,
-            )
+    def emit(self, key, method, payload, audience="status", user_id=None):
+        self.effects.append(
+            {
+                "key": key,
+                "method": method,
+                "payload": payload,
+                "audience": audience,
+                "user_id": user_id or self.incoming.actor_id,
+            }
         )
 
     def say(self, text, key="reply", user_id=None, keyboard=None, audience="status"):
         payload = {"chat_id": user_id or self.incoming.actor_id, "text": text}
         if keyboard:
             payload["reply_markup"] = keyboard.to_dict()
-        self.queue(key, "send_message", payload, audience, user_id)
+        self.emit(key, "send_message", payload, audience, user_id)
 
     def buttons(self, user):
         keyboard = InlineKeyboardMarkup()
@@ -91,7 +91,8 @@ class Handlers:
                 else ""
             )
         )
-        if first and user.status == "pending":
+        if user.approval_notice_state == "pending" and user.status == "pending":
+            user.approval_notice_state = "sending"
             name = " ".join(part for part in [user.first_name, user.last_name] if part)
             self.say(
                 f"Access request\nID: {user.id}\nName: {name}\nUsername: {user.username or '—'}\nLanguage: {user.language_code or '—'}",
@@ -174,25 +175,13 @@ class Handlers:
                 new_status=status,
             )
         )
-        # A decision from /admin must also retire the original channel request.
-        request = await self.session.scalar(
-            select(TelegramDelivery)
-            .join(IncomingUpdate, TelegramDelivery.update_id == IncomingUpdate.update_id)
-            .where(
-                IncomingUpdate.actor_id == user.id,
-                TelegramDelivery.action_key == "request",
-                TelegramDelivery.state == "sent",
-            )
-            .order_by(TelegramDelivery.id.desc())
-            .limit(1)
-        )
-        if request and request.telegram_message_id:
-            self.queue(
+        if user.approval_message_id:
+            self.emit(
                 "channel_decision",
                 "edit_message_text",
                 {
                     "chat_id": self.settings.admin_notification_channel_id,
-                    "message_id": request.telegram_message_id,
+                    "message_id": user.approval_message_id,
                     "text": f"User {user.id}: {status}",
                     "reply_markup": InlineKeyboardMarkup().to_dict(),
                 },
@@ -200,7 +189,7 @@ class Handlers:
             )
         if user.registered_at:
             self.say(f"Your access status is now {status}.", key="decision", user_id=user.id)
-        return request.telegram_message_id if request else None
+        return user.approval_message_id
 
     async def callback(self, callback):
         answer = "Admin access required."
@@ -239,7 +228,7 @@ class Handlers:
                             callback.message.chat.id != self.settings.admin_notification_channel_id
                             or callback.message.message_id != channel_message_id
                         ):
-                            self.queue(
+                            self.emit(
                                 "edit",
                                 "edit_message_text",
                                 {
@@ -252,21 +241,109 @@ class Handlers:
                             )
                     else:
                         answer = f"Already handled. Current status: {user.status}."
-        self.queue(
+        self.emit(
             "callback", "answer_callback_query", {"callback_query_id": callback.id, "text": answer}
         )
 
     async def other(self, message):
+        from app.services.operations import create_operation, retry_operation
+
         user = await self.session.get(User, message.from_user.id)
         approved = message.from_user.id == self.settings.admin_telegram_id or (
             user and user.status == "approved"
         )
-        self.say(
-            "Sentence saving is not available yet."
-            if approved
-            else "Send /start to view or request access.",
-            audience="protected" if approved else "status",
+        if not approved:
+            self.say("Send /start to view or request access.")
+            return
+        text = message.text or ""
+        if text.startswith("/retry "):
+            from uuid import UUID
+
+            try:
+                operation = await retry_operation(
+                    self.session, UUID(text.split()[1]), message.from_user.id
+                )
+            except (ValueError, IndexError):
+                operation = None
+            if operation is None:
+                self.say("No failed operation with that ID belongs to you.")
+            elif operation.status_message_id:
+                self.say("Retrying your operation.")
+            else:
+                self.status_effect(operation)
+            return
+        if text.startswith("/result "):
+            from uuid import UUID
+
+            from app.db.models import Operation
+
+            try:
+                operation_id = UUID(text.split()[1])
+            except (ValueError, IndexError):
+                self.say("Use /result with your operation ID.")
+                return
+            operation = await self.session.get(Operation, operation_id)
+            if (
+                operation is None
+                or operation.user_id != message.from_user.id
+                or operation.state != "done"
+            ):
+                self.say("No completed operation with that ID belongs to you.")
+                return
+            result = f"German:\n{operation.german}\n\nEnglish:\n{operation.english}"
+            for index in range(0, len(result), 4000):
+                self.say(result[index : index + 4000], key=f"result:{index}")
+            return
+        if text.startswith("/status"):
+            from app.db.models import Operation
+
+            rows = (
+                await self.session.scalars(
+                    select(Operation)
+                    .where(Operation.user_id == message.from_user.id)
+                    .order_by(Operation.created_at.desc())
+                    .limit(5)
+                )
+            ).all()
+            self.say(
+                "\n\n".join(
+                    f"{row.id}: {row.step} / {row.state}\nRetry: /retry {row.id}" for row in rows
+                )
+                or "No processing operations yet."
+            )
+            return
+        if text.startswith("/"):
+            self.say(
+                "Send German text or a voice recording (up to two minutes). Use /status to check processing."
+            )
+            return
+        voice = message.voice or message.audio
+        if voice and (voice.duration > 120 or (voice.file_size or 0) > 20 * 1024 * 1024):
+            self.say("Please send audio up to two minutes and 20 MiB.")
+            return
+        if not voice and (not text.strip() or len(text) > 1000):
+            self.say("Please send German text up to 1,000 characters or a voice recording.")
+            return
+        operation, created = await create_operation(
+            self.session,
+            message.from_user.id,
+            message.chat.id,
+            message.message_id,
+            voice.file_id if voice else None,
+            None if voice else text.strip(),
         )
+        if created:
+            self.status_effect(operation)
+
+    def status_effect(self, operation):
+        self.say(
+            "Transcribing…" if operation.step == "transcribe" else "Translating…",
+            key=f"operation:{operation.id}",
+        )
+        self.effects[-1]["payload"]["reply_parameters"] = {
+            "message_id": operation.source_message_id,
+            "allow_sending_without_reply": True,
+        }
 
     async def dispatch(self, update):
         await self.bot.process_new_updates([update])
