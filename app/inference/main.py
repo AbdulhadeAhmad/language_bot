@@ -7,17 +7,18 @@ import time
 from contextlib import asynccontextmanager, suppress
 from datetime import timedelta
 from pathlib import Path
+from typing import Literal
 from uuid import UUID, uuid4
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import and_, func, or_, select, text, update
 
 from app.db.models import ModelJob
 from app.db.session import Database
-from app.inference.runtime import load
+from app.inference.runtime import encode_mp3, load
 from app.paths import data_root
 
 logger = logging.getLogger(__name__)
@@ -228,7 +229,7 @@ def create_app(settings=None, database=None, infer=None, run_worker=True):
         if settings.model_kind != "asr":
             try:
                 input_text = TextInput.model_validate_json(body).text.strip()
-                if not input_text or (settings.model_kind == "tts" and len(input_text) > 1000):
+                if not input_text:
                     raise ValueError()
             except ValueError:
                 raise HTTPException(422, "Expected non-empty text within service limits") from None
@@ -290,12 +291,17 @@ def create_app(settings=None, database=None, infer=None, run_worker=True):
             }
 
     @app.get("/jobs/{job_id}/audio")
-    async def audio(job_id: UUID):
+    async def audio(job_id: UUID, format: Literal["wav", "mp3"] = "wav"):
         async with database.sessions() as session:
             job = await session.get(ModelJob, (job_id, settings.model_kind))
             if not job or job.state != "done" or not job.output_path:
                 raise HTTPException(404, "Audio not ready")
-            return FileResponse(job.output_path, media_type="audio/wav")
+            path = job.output_path
+        if not Path(path).is_file():
+            raise HTTPException(404, "Audio not ready")
+        if format == "mp3":
+            return Response(await asyncio.to_thread(encode_mp3, path), media_type="audio/mpeg")
+        return FileResponse(path, media_type="audio/wav")
 
     @app.delete("/jobs/{job_id}", status_code=204)
     async def discard(job_id: UUID):

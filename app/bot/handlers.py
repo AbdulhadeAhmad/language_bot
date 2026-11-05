@@ -192,7 +192,9 @@ class Handlers:
         return user.approval_message_id
 
     async def callback(self, callback):
-        if (callback.data or "").startswith(("library:", "entry:", "archive:")):
+        if (callback.data or "").startswith(
+            ("library:", "entry:", "archive:", "generate:", "play:")
+        ):
             user = await self.session.get(User, callback.from_user.id)
             approved = callback.from_user.id == self.settings.admin_telegram_id or (
                 user and user.status == "approved"
@@ -204,6 +206,10 @@ class Handlers:
                     answer = await self.library(value)
                 elif command == "entry":
                     answer = await self.entry(value)
+                elif command == "generate":
+                    answer = await self.generate_audio(value)
+                elif command == "play":
+                    answer = await self.play_audio(value)
                 else:
                     answer = await self.archive_retry(value)
             self.emit(
@@ -411,7 +417,7 @@ class Handlers:
         from app.services.archive import original_recording
 
         original = await original_recording(self.session, self.incoming.actor_id, row.id)
-        keyboard = None
+        keyboard = InlineKeyboardMarkup()
         if original:
             asset, media = original
             status = "archived" if media.archive_message_id else asset.state.replace("_", " ")
@@ -419,10 +425,37 @@ class Handlers:
                 status = "retained; archive storage is disabled"
             result += f"\n\nOriginal recording: {status}."
             if asset.state == "archive_failed" and self.settings.telegram_archive_enabled:
-                keyboard = InlineKeyboardMarkup()
                 keyboard.add(
                     InlineKeyboardButton("Retry archive", callback_data=f"archive:{row.id}")
                 )
+            if asset.state == "ready" and media.archive_message_id:
+                keyboard.add(
+                    InlineKeyboardButton(
+                        "Play original recording", callback_data=f"play:{asset.id}"
+                    )
+                )
+        from app.db.models import AudioJob
+        from app.services.audio import generated_audio
+
+        generated = await generated_audio(self.session, self.incoming.actor_id, row.id)
+        if generated and generated.state == "ready":
+            keyboard.add(
+                InlineKeyboardButton("Play German audio", callback_data=f"play:{generated.id}")
+            )
+        elif self.settings.telegram_tts_enabled:
+            if generated:
+                job = await self.session.get(AudioJob, generated.id)
+                if generated.state == "failed":
+                    step = "generate" if job and job.step == "synthesize" else "save"
+                    result += (
+                        f"\n\nCould not {step} German audio. Your text and translation are saved."
+                    )
+                else:
+                    result += f"\n\nGerman audio: {generated.state}."
+            if not generated or generated.state == "failed":
+                label = "Retry German audio" if generated else "Generate German audio"
+                keyboard.add(InlineKeyboardButton(label, callback_data=f"generate:{row.id}"))
+        keyboard.add(InlineKeyboardButton("Refresh entry", callback_data=f"entry:{row.id}"))
         for index in range(0, len(result), 4000):
             self.say(
                 result[index : index + 4000],
@@ -430,6 +463,41 @@ class Handlers:
                 keyboard=keyboard if index == 0 else None,
             )
         return "Entry opened."
+
+    async def generate_audio(self, value):
+        from uuid import UUID
+
+        from app.services.audio import request_audio
+
+        if not self.settings.telegram_tts_enabled:
+            return "German audio generation is not enabled yet."
+        try:
+            sentence_id = UUID(value)
+        except ValueError:
+            return "Entry unavailable."
+        asset = await request_audio(
+            self.session, self.settings, self.incoming.actor_id, sentence_id
+        )
+        if asset is None:
+            return "Entry unavailable."
+        if asset.state == "ready":
+            return "German audio is ready. Open the saved entry to play it."
+        return "German audio queued. Refresh the entry to check progress."
+
+    async def play_audio(self, value):
+        from uuid import UUID
+
+        from app.services.audio import playback_payload
+
+        try:
+            asset_id = UUID(value)
+        except ValueError:
+            return "Recording unavailable."
+        payload = await playback_payload(self.session, self.incoming.actor_id, asset_id)
+        if payload is None:
+            return "Recording unavailable."
+        self.emit("playback", "copy_message", payload)
+        return "Playing recording."
 
     async def archive_retry(self, value):
         from uuid import UUID

@@ -1,7 +1,7 @@
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 
-SCHEMA_REVISION = "0005_archive_jobs"
+SCHEMA_REVISION = "0006_audio_jobs"
 
 
 class Database:

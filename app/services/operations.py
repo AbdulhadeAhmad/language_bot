@@ -174,6 +174,10 @@ class OperationRunner:
                     ]
                 ]
             }
+            if self.settings.telegram_tts_enabled:
+                payload["reply_markup"]["inline_keyboard"].append(
+                    [{"text": "Generate German audio", "callback_data": f"generate:{sentence_id}"}]
+                )
         async with asyncio.timeout(self.settings.telegram_timeout_seconds):
             await self.transport.send("edit_message_text", payload)
 

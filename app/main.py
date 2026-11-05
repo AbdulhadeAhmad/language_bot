@@ -14,6 +14,7 @@ from app.db.session import Database
 from app.logging import configure_logging
 from app.providers.http import ModelClient
 from app.services.archive import ArchiveRunner
+from app.services.audio import AudioRunner
 from app.services.operations import OperationRunner
 from app.services.telegram import handle_update
 
@@ -46,6 +47,10 @@ def create_app(
             if settings.telegram_archive_enabled:
                 tasks.append(
                     asyncio.create_task(ArchiveRunner(database, settings, transport).serve())
+                )
+            if settings.telegram_tts_enabled:
+                tasks.append(
+                    asyncio.create_task(AudioRunner(database, settings, transport, models).serve())
                 )
         try:
             yield

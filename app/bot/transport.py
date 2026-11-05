@@ -1,9 +1,26 @@
+import io
+from dataclasses import dataclass
 from typing import Protocol
 
 from telebot.apihelper import ApiTelegramException as SyncApiTelegramException
 from telebot.async_telebot import AsyncTeleBot
 from telebot.asyncio_helper import ApiTelegramException, session_manager
-from telebot.types import InlineKeyboardMarkup, ReplyParameters
+from telebot.types import InlineKeyboardMarkup, InputFile, ReplyParameters
+
+
+@dataclass(frozen=True)
+class UploadedAudio:
+    message_id: int
+    file_id: str
+
+
+def delivery_error(exc):
+    if exc.error_code == 429:
+        seconds = exc.result_json.get("parameters", {}).get("retry_after", 1)
+        raise RetryAfter(int(seconds)) from None
+    if exc.error_code >= 500:
+        raise ConnectionError("Telegram server error") from None
+    raise RejectedDelivery("Telegram rejected the delivery") from None
 
 
 class RetryAfter(Exception):
@@ -44,19 +61,22 @@ class BotTransport:
             if method == "copy_message":
                 result = await self.bot.copy_message(**payload)
                 return result.message_id
+            if method == "edit_message_reply_markup":
+                result = await self.bot.edit_message_reply_markup(**payload)
+                return getattr(result, "message_id", None)
             if method == "edit_message_text":
                 result = await self.bot.edit_message_text(**payload)
                 return getattr(result, "message_id", None)
             raise RejectedDelivery("Unsupported delivery method")
         except (ApiTelegramException, SyncApiTelegramException) as exc:
             if (
-                method == "edit_message_text"
+                method in {"edit_message_text", "edit_message_reply_markup"}
                 and exc.error_code == 400
                 and "message is not modified" in exc.description.lower()
             ):
                 return payload.get("message_id")
             if (
-                method == "edit_message_text"
+                method in {"edit_message_text", "edit_message_reply_markup"}
                 and exc.error_code == 400
                 and any(
                     value in exc.description.lower()
@@ -64,13 +84,26 @@ class BotTransport:
                 )
             ):
                 raise MissingStatusMessage("Status message unavailable") from None
-            if exc.error_code == 429:
-                seconds = exc.result_json.get("parameters", {}).get("retry_after", 1)
-                raise RetryAfter(int(seconds)) from None
-            # A server error can have an uncertain outcome; do not automatically resend.
-            if exc.error_code >= 500:
-                raise ConnectionError("Telegram server error") from None
-            raise RejectedDelivery("Telegram rejected the delivery") from None
+            delivery_error(exc)
+
+    async def upload_audio(self, channel_id: int, audio: bytes) -> UploadedAudio:
+        try:
+            with io.BytesIO(audio) as stream:
+                message = await self.bot.send_audio(
+                    channel_id,
+                    InputFile(stream, file_name="german.mp3"),
+                    caption="",
+                    title="German pronunciation",
+                    performer="Thorsten",
+                    disable_notification=True,
+                )
+            if not message.audio or not message.audio.file_id:
+                error = ConnectionError("Audio receipt unavailable")
+                error.message_id = message.message_id
+                raise error
+            return UploadedAudio(message.message_id, message.audio.file_id)
+        except (ApiTelegramException, SyncApiTelegramException) as exc:
+            delivery_error(exc)
 
     async def download(self, file_id: str) -> bytes:
         import aiohttp

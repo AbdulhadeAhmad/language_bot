@@ -51,5 +51,30 @@ class ModelClient:
         result = await self.run("translation", job_id, text=operation.german)
         return result["text"]
 
+    @staticmethod
+    def speech_id(job):
+        return uuid5(job.asset_id, f"tts:{job.generation}")
+
+    async def synthesize(self, job, german):
+        return await self.run("tts", self.speech_id(job), text=german)
+
+    async def speech_audio(self, job):
+        url = self.settings.tts_url.rstrip("/") + f"/jobs/{self.speech_id(job)}/audio?format=mp3"
+        async with self.client.stream("GET", url) as response:
+            response.raise_for_status()
+            audio = bytearray()
+            async for chunk in response.aiter_bytes():
+                audio.extend(chunk)
+                if len(audio) > 20 * 1024 * 1024:
+                    raise ValueError("GeneratedAudioTooLarge")
+        if not audio:
+            raise ValueError("EmptyGeneratedAudio")
+        return bytes(audio)
+
+    async def discard_speech(self, job):
+        url = self.settings.tts_url.rstrip("/") + f"/jobs/{self.speech_id(job)}"
+        response = await self.client.delete(url)
+        response.raise_for_status()
+
     async def close(self):
         await self.client.aclose()

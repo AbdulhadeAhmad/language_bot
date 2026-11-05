@@ -3,6 +3,40 @@
 import wave
 
 
+def speech_chunks(text, limit=1000):
+    text = " ".join(text.split())
+    while len(text) > limit:
+        boundary = text.rfind(" ", 0, limit + 1)
+        if boundary < 1:
+            boundary = limit
+        yield text[:boundary]
+        text = text[boundary:].lstrip()
+    if text:
+        yield text
+
+
+def encode_mp3(path):
+    import io
+
+    import av
+
+    output = io.BytesIO()
+    with av.open(str(path)) as source, av.open(output, "w", format="mp3") as destination:
+        stream = destination.add_stream("libmp3lame", rate=24000)
+        stream.layout, stream.bit_rate = "mono", 64000
+        resampler = av.AudioResampler(format="fltp", layout="mono", rate=24000)
+        for frame in source.decode(audio=0):
+            for converted in resampler.resample(frame):
+                for packet in stream.encode(converted):
+                    destination.mux(packet)
+        for converted in resampler.resample(None):
+            for packet in stream.encode(converted):
+                destination.mux(packet)
+        for packet in stream.encode(None):
+            destination.mux(packet)
+    return output.getvalue()
+
+
 def load(kind, model_dir, threads):
     if kind == "asr":
         from faster_whisper import WhisperModel
@@ -73,7 +107,8 @@ def load(kind, model_dir, threads):
 
         def infer(job, output):
             with wave.open(str(output), "wb") as stream:
-                model.synthesize_wav(job.input_text, stream)
+                for index, chunk in enumerate(speech_chunks(job.input_text)):
+                    model.synthesize_wav(chunk, stream, set_wav_format=index == 0)
             with wave.open(str(output), "rb") as stream:
                 if stream.getnframes() == 0:
                     raise ValueError("EmptyAudio")

@@ -47,6 +47,7 @@ def test_config_parses_allowlist_and_hides_secrets():
         {"telegram_bot_token": "invalid"},
         {"telegram_media_channel_id": 1},
         {"telegram_archive_enabled": True, "telegram_media_channel_id": None},
+        {"telegram_tts_enabled": True, "telegram_archive_enabled": False},
     ],
 )
 def test_invalid_config_fails_early(override):

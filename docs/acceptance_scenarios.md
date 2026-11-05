@@ -9,7 +9,7 @@ These scenarios translate `implementation_plan.md` into observable outcomes. The
 | A03 | M3 | Alice intentionally sends identical German twice in different updates; Bob sends it too. | Three independently owned sentences. Detected accessible matches produce a small warning, never rejection or automatic merging. |
 | A04 | M3 | Compare `Ich  komme.` and ` Ich komme. `, composed/decomposed umlauts, `ich komme.`, and `Ich komme!`. | Whitespace and Unicode-equivalent forms match; case and punctuation differences do not. |
 | A05 | M3, M7 | Bob privately saves text that Alice later submits. | Alice gets no indication that Bob's private sentence exists. |
-| A06 | M3, M5 | Alice submits text; Bob submits a voice note. | Independent saved German/English entries and one edited progress message each, with advisory duplicate warnings where applicable. Bot audio and archive integration are deferred. |
+| A06 | M3, M5 | Alice submits text; Bob submits a voice note. | Independent saved German/English entries and one edited progress message each, with advisory duplicate warnings where applicable. Originals archive independently. With generated audio enabled, owners can request it separately and play archived audio without repeating inference. |
 | A07 | M5 | One generated voice fails; translation or ASR fails in separate cases. | Successful work remains saved; retry only the failed work. No false READY status. |
 | A08 | M4, M5 | Inference is busy while the other user opens settings or a saved entry. | Interaction handling remains responsive and is not awaiting inference. |
 | A09 | M5 | Submit 1,000/1,001 characters and voice notes of 120/121 seconds. | Boundary inputs are accepted; over-limit inputs are rejected before expensive work. |
@@ -61,5 +61,5 @@ M0 is complete when these scenarios and the implementation plan agree. Later mil
 - Transcription and translation update the same message, ending with German and English only. Other commands remain responsive during inference.
 - Restarting the API resumes pending steps; restarting a model service recovers its expired lease. Late results from old claim tokens cannot overwrite current results.
 - Model APIs accept stable job IDs, return existing results for identical retries, reject conflicting inputs, and apply bounded admission using PostgreSQL.
-- Model ports are not published; services join only the internal Docker network. TTS produces a WAV through its internal API but is not called by the bot yet.
+- Model ports are not published; services join only the internal Docker network. TTS retains its WAV API and offers an MP3 response for Telegram. Generated-audio integration is disabled until its payload/destination approval; once enabled it runs only for an owner's explicit Generate German audio action.
 - Upgrading removes the raw inbox/outbox while preserving user approvals, access audit records, and known approval-message IDs.

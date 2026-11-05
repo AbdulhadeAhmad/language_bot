@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     admin_notification_channel_id: int = Field(lt=0)
     telegram_media_channel_id: int | None = Field(default=None, lt=0)
     telegram_archive_enabled: bool = False
+    telegram_tts_enabled: bool = False
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     worker_poll_seconds: float = Field(default=0.5, gt=0, le=60)
     telegram_timeout_seconds: int = Field(default=15, ge=1, le=60)
@@ -32,6 +33,8 @@ class Settings(BaseSettings):
     def archive_requires_channel(self):
         if self.telegram_archive_enabled and self.telegram_media_channel_id is None:
             raise ValueError("Enabled archive storage requires TELEGRAM_MEDIA_CHANNEL_ID")
+        if self.telegram_tts_enabled and not self.telegram_archive_enabled:
+            raise ValueError("Generated audio requires enabled archive storage")
         return self
 
     @field_validator("database_url")
