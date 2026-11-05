@@ -1,10 +1,11 @@
 import asyncio
 from datetime import timedelta
 
+import pytest
 from sqlalchemy import func, select, update
 
 from app.db.models import Operation, User
-from app.services.operations import OperationRunner
+from app.services.operations import OperationRunner, StaleOperationClaim
 
 from .test_foundation import FakeModels, RecordingTransport, dispatch, payload
 
@@ -50,6 +51,10 @@ async def test_expired_claim_fences_stale_result(db, config):
         )
     new = await runner.claim()
     assert old.claim_token != new.claim_token
+    before = len(transport.sent)
+    with pytest.raises(StaleOperationClaim):
+        await runner.render(old, "Obsolete progress")
+    assert len(transport.sent) == before
     assert not await runner.finish(old, state="done")
     assert await runner.finish(new, state="pending")
 

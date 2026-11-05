@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import make_url
 
@@ -17,7 +17,8 @@ class Settings(BaseSettings):
     telegram_webhook_secret: SecretStr
     admin_telegram_id: int = Field(gt=0)
     admin_notification_channel_id: int = Field(lt=0)
-    telegram_media_channel_id: int | None = None
+    telegram_media_channel_id: int | None = Field(default=None, lt=0)
+    telegram_archive_enabled: bool = False
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     worker_poll_seconds: float = Field(default=0.5, gt=0, le=60)
     telegram_timeout_seconds: int = Field(default=15, ge=1, le=60)
@@ -26,6 +27,12 @@ class Settings(BaseSettings):
     tts_url: str = "http://tts:8080"
     operation_concurrency: int = Field(default=4, ge=1, le=16)
     operation_timeout_seconds: int = Field(default=900, ge=10)
+
+    @model_validator(mode="after")
+    def archive_requires_channel(self):
+        if self.telegram_archive_enabled and self.telegram_media_channel_id is None:
+            raise ValueError("Enabled archive storage requires TELEGRAM_MEDIA_CHANNEL_ID")
+        return self
 
     @field_validator("database_url")
     @classmethod

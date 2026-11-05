@@ -86,6 +86,30 @@ class AudioAsset(Base):
     active: Mapped[bool] = mapped_column(Boolean, server_default="true")
 
 
+class ArchiveJob(Base):
+    __tablename__ = "archive_jobs"
+    __table_args__ = (
+        CheckConstraint("state IN ('pending','running','done','failed')", name="archive_job_state"),
+        Index("ix_archive_jobs_ready", "state", "available_at"),
+    )
+    media_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("stored_media.id", ondelete="CASCADE"), primary_key=True
+    )
+    source_chat_id: Mapped[int] = mapped_column(BigInteger)
+    source_message_id: Mapped[int] = mapped_column(BigInteger)
+    target_chat_id: Mapped[int | None] = mapped_column(BigInteger)
+    state: Mapped[str] = mapped_column(String(16), server_default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, server_default="0")
+    uncertain: Mapped[bool] = mapped_column(Boolean, server_default="false")
+    error_type: Mapped[str | None] = mapped_column(String(100))
+    available_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    claim_token: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class User(Base):
     __tablename__ = "users"
     __table_args__ = (

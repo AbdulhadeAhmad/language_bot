@@ -45,6 +45,8 @@ def test_config_parses_allowlist_and_hides_secrets():
         {"database_url": "sqlite:///test.db"},
         {"telegram_webhook_secret": "short"},
         {"telegram_bot_token": "invalid"},
+        {"telegram_media_channel_id": 1},
+        {"telegram_archive_enabled": True, "telegram_media_channel_id": None},
     ],
 )
 def test_invalid_config_fails_early(override):

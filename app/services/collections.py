@@ -5,7 +5,7 @@ from uuid import uuid4
 
 from sqlalchemy import or_, select
 
-from app.db.models import AudioAsset, Operation, Sentence, StoredMedia, User
+from app.db.models import ArchiveJob, AudioAsset, Operation, Sentence, StoredMedia, User
 
 DUPLICATE_WARNING = "Similar German text already exists in your collection or a public collection."
 
@@ -85,7 +85,18 @@ async def save_capture(session, claimed):
         await session.flush()
         session.add(
             AudioAsset(
-                id=uuid4(), sentence_id=sentence.id, stored_media_id=media.id, kind="original"
+                id=uuid4(),
+                sentence_id=sentence.id,
+                stored_media_id=media.id,
+                kind="original",
+                state="archiving",
+            )
+        )
+        session.add(
+            ArchiveJob(
+                media_id=media.id,
+                source_chat_id=operation.chat_id,
+                source_message_id=operation.source_message_id,
             )
         )
     return sentence

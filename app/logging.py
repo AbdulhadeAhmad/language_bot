@@ -15,6 +15,9 @@ FIELDS = (
     "worker_role",
     "operation",
     "error_type",
+    "media_id",
+    "archive_chat_id",
+    "archive_message_id",
 )
 
 

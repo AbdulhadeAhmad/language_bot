@@ -64,6 +64,11 @@ def test_upgrade_preserves_users_and_channel_reference_but_removes_updates(
                 )
                 == "original-recording"
             )
+            job = await connection.fetchrow(
+                "SELECT * FROM archive_jobs WHERE media_id=$1", sentence["id"]
+            )
+            assert job["state"] == "pending" and job["attempts"] == 0
+            assert job["source_chat_id"] == 22 and job["source_message_id"] == 1
         finally:
             await connection.close()
 

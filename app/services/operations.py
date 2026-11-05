@@ -17,6 +17,10 @@ logger = logging.getLogger(__name__)
 LEASE_SECONDS = 60
 
 
+class StaleOperationClaim(Exception):
+    pass
+
+
 async def create_operation(session, user_id, chat_id, message_id, file_id, german):
     operation_id = uuid4()
     inserted = await session.scalar(
@@ -140,8 +144,27 @@ class OperationRunner:
                 if not result.rowcount:
                     return
 
-    async def render(self, row, text, sentence_id=None):
-        payload = {"chat_id": row.chat_id, "message_id": row.status_message_id, "text": text}
+    async def render(self, row, text, sentence_id=None, *, failed=False):
+        async with self.database.sessions() as session:
+            query = select(Operation).where(
+                Operation.id == row.id, Operation.generation == row.generation
+            )
+            if failed:
+                query = query.where(Operation.state == "failed", Operation.attempts == row.attempts)
+            else:
+                query = query.where(
+                    Operation.claim_token == row.claim_token,
+                    Operation.state == "running",
+                    Operation.step == row.step,
+                )
+            current = await session.scalar(query)
+            if current is None or current.status_message_id is None:
+                raise StaleOperationClaim()
+            payload = {
+                "chat_id": current.chat_id,
+                "message_id": current.status_message_id,
+                "text": text,
+            }
         if sentence_id is not None:
             payload["reply_markup"] = {
                 "inline_keyboard": [
@@ -209,6 +232,8 @@ class OperationRunner:
                         result += f"\n\n{DUPLICATE_WARNING}"
                     await self.render(row, result, sentence.id)
                     await self.finish(row, state="done", error_type=None)
+        except StaleOperationClaim:
+            return True
         except Exception as exc:
             permanent = isinstance(exc, (ValueError, MissingStatusMessage)) or row.attempts >= 3
             state = "failed" if permanent else "pending"
@@ -231,7 +256,7 @@ class OperationRunner:
             if finished and permanent:
                 with suppress(Exception):
                     await self.render(
-                        row, f"Could not finish {row.step}. Retry with /retry {row.id}"
+                        row, f"Could not finish {row.step}. Retry with /retry {row.id}", failed=True
                     )
         finally:
             heartbeat.cancel()

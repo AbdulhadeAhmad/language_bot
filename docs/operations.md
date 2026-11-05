@@ -2,7 +2,17 @@
 
 The API handles commands and replies directly through AsyncTeleBot. German voice/text capture advances through transcription and translation using private model services, then saves an independent personal entry. The same status message ends with both texts and buttons to open the entry or collection. TTS is available internally; bot audio generation/playback is deferred. Editing, public discovery, and reviews remain future work.
 
-Use `/library` to browse your saved entries, or `/entry ID` to open one. Collections start private. Identical submissions remain separate; matches against your own or public entries produce a small advisory warning. Other users' private entries never trigger warnings. Migration `0004_collections` imports previously completed captures and original Telegram recording references. Archive upload/playback remains future work. Back up the database before upgrading, then use the normal image build and Compose startup commands below to apply the migration.
+Use `/library` to browse your saved entries, or `/entry ID` to open one. Collections start private. Identical submissions remain separate; matches against your own or public entries produce a small advisory warning. Other users' private entries never trigger warnings. Migration `0004_collections` imports previously completed captures and original Telegram recording references. Back up the database before upgrading, then use the normal image build and Compose startup commands below to apply migrations.
+
+## Original-recording archive (opt-in)
+
+`TELEGRAM_ARCHIVE_ENABLED` defaults to `false`. Leave it disabled until the owner approves copying original recordings into the private channel identified by `TELEGRAM_MEDIA_CHANNEL_ID`. The bot needs permission to post there. No recordings are copied while disabled; captures and translation continue normally.
+
+After approval, set `TELEGRAM_ARCHIVE_ENABLED=true` in the external `.env` and recreate services. Migration `0005_archive_jobs` queues existing original recordings; new captures enqueue their archive job in the same transaction as their saved entry. The API's separate archive runner copies the original voice/audio message into the channel, strips its caption and keyboard, and stores the archive message reference. It uses Telegram's server-side copy, so there is no local original-audio upload file to retain. The job's destination is fixed on its first attempt. Disabling archiving stops new claims after the API is recreated; an already-issued Telegram request may still complete.
+
+Archive jobs use row locks, leases, heartbeats, fenced completion, and up to three copy attempts per retry cycle. Rate limits honor Telegram's Retry-After delay. Network failures can have uncertain outcomes: another attempt may leave an extra archive message, but it cannot create a second active database asset or overwrite a newer result. Structured `archive_result_uncertain` and `archive_orphan_possible` events identify the media, and include the destination/message ID when a receipt is known, for manual archive cleanup. Do not delete archive messages referenced by active assets.
+
+Entry details show original-recording storage state. Owners can retry failed storage from the entry's button when archiving is enabled. A missing/deleted source message or insufficient channel rights fails without discarding the saved text, translation, or original Telegram file reference. Original playback controls and generated TTS playback remain later capture work. Model-service temporary files keep their existing success/failure cleanup and periodic/startup orphan cleanup.
 
 ## External data setup
 

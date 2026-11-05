@@ -192,7 +192,7 @@ class Handlers:
         return user.approval_message_id
 
     async def callback(self, callback):
-        if (callback.data or "").startswith(("library:", "entry:")):
+        if (callback.data or "").startswith(("library:", "entry:", "archive:")):
             user = await self.session.get(User, callback.from_user.id)
             approved = callback.from_user.id == self.settings.admin_telegram_id or (
                 user and user.status == "approved"
@@ -202,8 +202,10 @@ class Handlers:
                 command, value = callback.data.split(":", 1)
                 if command == "library":
                     answer = await self.library(value)
-                else:
+                elif command == "entry":
                     answer = await self.entry(value)
+                else:
+                    answer = await self.archive_retry(value)
             self.emit(
                 "callback",
                 "answer_callback_query",
@@ -406,9 +408,43 @@ class Handlers:
             self.say("Entry unavailable.")
             return "Entry unavailable."
         result = f"German:\n{row.german}\n\nEnglish:\n{row.english}"
+        from app.services.archive import original_recording
+
+        original = await original_recording(self.session, self.incoming.actor_id, row.id)
+        keyboard = None
+        if original:
+            asset, media = original
+            status = "archived" if media.archive_message_id else asset.state.replace("_", " ")
+            if not media.archive_message_id and not self.settings.telegram_archive_enabled:
+                status = "retained; archive storage is disabled"
+            result += f"\n\nOriginal recording: {status}."
+            if asset.state == "archive_failed" and self.settings.telegram_archive_enabled:
+                keyboard = InlineKeyboardMarkup()
+                keyboard.add(
+                    InlineKeyboardButton("Retry archive", callback_data=f"archive:{row.id}")
+                )
         for index in range(0, len(result), 4000):
-            self.say(result[index : index + 4000], key=f"entry:{index}")
+            self.say(
+                result[index : index + 4000],
+                key=f"entry:{index}",
+                keyboard=keyboard if index == 0 else None,
+            )
         return "Entry opened."
+
+    async def archive_retry(self, value):
+        from uuid import UUID
+
+        from app.services.archive import retry_archive
+
+        if not self.settings.telegram_archive_enabled:
+            return "Archive storage is not enabled."
+        try:
+            sentence_id = UUID(value)
+        except ValueError:
+            return "Entry unavailable."
+        if not await retry_archive(self.session, self.incoming.actor_id, sentence_id):
+            return "No failed archive belongs to you for this entry."
+        return "Retrying the archive. Open the entry to check progress."
 
     def status_effect(self, operation):
         self.say(

@@ -12,8 +12,8 @@ Move each milestone through **Not started → In progress → Verification → D
 | M1 — Runtime and model feasibility | In progress | [First server-run findings](docs/benchmark_findings_20261103.md): translation and three TTS voices completed. ASR rerun passed; [second-run findings](docs/benchmark_findings_20261104.md) compare accuracy and expanded TTS performance. [Round-two commands](benchmarks/README.md) compare six Piper variants and three Qwen3-TTS 0.6B speakers over 27 inputs. Quality, license review, and final selection remain pending. |
 | M2 — Async application foundation | Done | Owner accepted completion on 2026-11-05 after successfully testing live transcription and translation. Current deployment and model smoke checks passed; fresh-deployment/recreation checks for the latest refactor were not rerun. [Operations](docs/operations.md). |
 | M3 — Collections and duplicate warnings | Done | Personal sentence/media/voice schema, completed-capture migration, `/library` pagination, owner-only entry controls, normalized non-unique lookup, and private-safe advisory warnings implemented. 14 unit and 33 PostgreSQL integration tests pass, including concurrency, redelivery/retry idempotency, ownership, privacy, and migration preservation/rollback. Current deployment verified healthy with schema and collection smoke checks. |
-| M4 — Durable jobs and archive storage | In progress | Domain operations and three model-service queues implemented. Telegram archive lifecycle remains future work. |
-| M5 — Voice and text capture | In progress | German voice/text → translation → saved personal entry implemented with one status message and advisory duplicate warnings. Original Telegram file references retained; archive handling remains. Bot audio generation/playback deferred. |
+| M4 — Durable jobs and archive storage | Verification | Opt-in archive queue, migration/backfill, server-side media adapter, leases/heartbeats, bounded retries, orphan logging, and owner-only retry controls implemented. 17 unit and 40 PostgreSQL integration tests pass. Live copying remains disabled pending explicit approval of the configured archive destination. |
+| M5 — Voice and text capture | In progress | German voice/text → translation → saved personal entry implemented with one status message and advisory duplicate warnings. Original Telegram references retained; opt-in archive implementation awaits activation. Playback controls and bot TTS generation/playback remain deferred. |
 | M6 — Editing and deletion | Not started | |
 | M7 — Privacy, discovery, and copying | Not started | |
 | M8 — Practice and FSRS | Not started | |
@@ -198,7 +198,7 @@ Each milestone closes only when its acceptance checks pass. M1 benchmarking cont
 
 **Deliverables**
 
-- Current voice flow: transcribe → translate → save personal entry and show both texts in the original status message with accessible duplicate warnings. Archive integration remains to be implemented.
+- Current voice flow: transcribe → translate → save personal entry and show both texts in the original status message with accessible duplicate warnings. Original recording archive jobs are implemented but disabled pending destination approval.
 - Current text flow: translate → save personal entry and show both texts. TTS is independently available through its private API; bot audio generation/playback is deferred.
 - One editable processing-status message with management controls.
 - Step-specific failure information and retry actions.
@@ -459,3 +459,12 @@ Track each milestone as **Not started → In progress → Verification → Done*
 - All five long-running services are healthy and migration exits successfully. `alembic check` reports no schema differences; host API readiness returns ready. Saved data remains present after recreation.
 - Deployed `/library`, entry details, and ownership isolation passed smoke checks against existing saved data with Telegram replies captured locally. No test messages were sent to Telegram.
 - Real translation, TTS WAV generation, and ASR transcription passed again through private HTTP services after recreation; smoke-job intermediate files were released through their APIs.
+
+### 2026-11-05 — M3 committed; opt-in M4 archive implementation
+
+- Committed M3 as `3f0508f`. Added `ArchiveJob` and migration `0005_archive_jobs`, backfilling original recordings and atomically enqueuing new originals with saved entries. Existing text/translation and Telegram file references survive storage failures.
+- Added a server-side Telegram copy adapter that strips captions/keyboards and avoids forwarding links. Archive jobs pin their destination on first claim, use SKIP LOCKED leases and heartbeats, fence completion, honor rate-limit delays, and bound copy attempts. Uncertain outcomes and known orphan receipts are logged for cleanup without duplicating active assets.
+- Added per-recording storage status and owner/approval-checked manual retries. Capture status rendering now reads persisted state and refuses expired claims before issuing obsolete progress edits. Existing model artifact cleanup remains in place; server-side original copies introduce no local audio upload files.
+- Automatic approval review rejected activating a recording-copy worker without explicit destination/payload approval. Added `TELEGRAM_ARCHIVE_ENABLED=false` by default and tested the disabled gate. No recordings have been copied and the live M3 deployment has not been upgraded to this implementation.
+- Read-only Telegram checks confirmed the configured destination is a channel without a public username and the bot is an administrator with posting rights. Activation and live archive validation await owner approval of copying original voice/audio messages, with captions removed, to that configured private channel.
+- Verification: 17 unit and 40 disposable-PostgreSQL integration tests pass. New archive tests cover transactional rollback, concurrent claims, disabled behavior, slow network without held database locks, expired leases/late receipts, Retry-After, bounded uncertain retries, permanent rejection, owner-only retry callbacks, and final-attempt recovery. Migration tests verify archive backfill and downgrade/re-upgrade. Ruff and whitespace checks pass.

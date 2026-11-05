@@ -59,3 +59,16 @@ async def test_transport_restores_native_keyboard():
         transport.bot.send_message.call_args.kwargs["reply_markup"], InlineKeyboardMarkup
     )
     await transport.close()
+
+
+async def test_archive_transport_copies_without_forwarding_identity_or_caption():
+    from app.services.archive import copy_payload
+
+    transport = BotTransport("12345:test")
+    transport.bot.copy_message = AsyncMock(return_value=type("Receipt", (), {"message_id": 7})())
+    assert await transport.send("copy_message", copy_payload(-10088, 11, 42)) == 7
+    kwargs = transport.bot.copy_message.call_args.kwargs
+    assert kwargs["caption"] == "" and kwargs["disable_notification"]
+    assert kwargs["from_chat_id"] == 11 and kwargs["message_id"] == 42
+    assert isinstance(kwargs["reply_markup"], InlineKeyboardMarkup)
+    await transport.close()

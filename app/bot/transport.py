@@ -41,6 +41,9 @@ class BotTransport:
             if method == "answer_callback_query":
                 await self.bot.answer_callback_query(**payload)
                 return None
+            if method == "copy_message":
+                result = await self.bot.copy_message(**payload)
+                return result.message_id
             if method == "edit_message_text":
                 result = await self.bot.edit_message_text(**payload)
                 return getattr(result, "message_id", None)

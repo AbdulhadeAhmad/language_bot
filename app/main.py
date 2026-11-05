@@ -13,6 +13,7 @@ from app.config import Settings
 from app.db.session import Database
 from app.logging import configure_logging
 from app.providers.http import ModelClient
+from app.services.archive import ArchiveRunner
 from app.services.operations import OperationRunner
 from app.services.telegram import handle_update
 
@@ -37,16 +38,21 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         configure_logging(settings.log_level)
-        task = (
-            asyncio.create_task(OperationRunner(database, settings, transport, models).serve())
-            if run_operations
-            else None
-        )
+        tasks = []
+        if run_operations:
+            tasks.append(
+                asyncio.create_task(OperationRunner(database, settings, transport, models).serve())
+            )
+            if settings.telegram_archive_enabled:
+                tasks.append(
+                    asyncio.create_task(ArchiveRunner(database, settings, transport).serve())
+                )
         try:
             yield
         finally:
-            if task:
+            for task in tasks:
                 task.cancel()
+            for task in tasks:
                 with suppress(asyncio.CancelledError):
                     await task
             await transport.close()
