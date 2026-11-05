@@ -192,6 +192,24 @@ class Handlers:
         return user.approval_message_id
 
     async def callback(self, callback):
+        if (callback.data or "").startswith(("library:", "entry:")):
+            user = await self.session.get(User, callback.from_user.id)
+            approved = callback.from_user.id == self.settings.admin_telegram_id or (
+                user and user.status == "approved"
+            )
+            answer = "Send /start to view or request access."
+            if approved and callback.message and callback.message.chat.type == "private":
+                command, value = callback.data.split(":", 1)
+                if command == "library":
+                    answer = await self.library(value)
+                else:
+                    answer = await self.entry(value)
+            self.emit(
+                "callback",
+                "answer_callback_query",
+                {"callback_query_id": callback.id, "text": answer},
+            )
+            return
         answer = "Admin access required."
         if callback.from_user.id == self.settings.admin_telegram_id:
             parts = (callback.data or "").split(":")
@@ -255,7 +273,21 @@ class Handlers:
         if not approved:
             self.say("Send /start to view or request access.")
             return
+        if message.from_user.id == self.settings.admin_telegram_id and user is None:
+            # Only the explicitly configured administrator bypasses registration.
+            await self.session.execute(
+                insert(User)
+                .values(id=self.settings.admin_telegram_id, status="approved")
+                .on_conflict_do_nothing()
+            )
         text = message.text or ""
+        command = text.split(maxsplit=1)
+        if command and command[0] == "/library":
+            await self.library(command[1] if len(command) == 2 else "0")
+            return
+        if command and command[0] == "/entry":
+            await self.entry(command[1] if len(command) == 2 else "")
+            return
         if text.startswith("/retry "):
             from uuid import UUID
 
@@ -314,7 +346,7 @@ class Handlers:
             return
         if text.startswith("/"):
             self.say(
-                "Send German text or a voice recording (up to two minutes). Use /status to check processing."
+                "Send German text or a voice recording (up to two minutes). Use /library for saved entries or /status to check processing."
             )
             return
         voice = message.voice or message.audio
@@ -334,6 +366,49 @@ class Handlers:
         )
         if created:
             self.status_effect(operation)
+
+    async def library(self, value):
+        from app.services.collections import list_sentences
+
+        if not value.isascii() or not value.isdigit() or len(value) > 7 or int(value) > 1000000:
+            self.say("Use /library or /library PAGE (starting at 0).")
+            return "Invalid page."
+        page = int(value)
+        rows = await list_sentences(self.session, self.incoming.actor_id, page)
+        if not rows:
+            self.say(
+                "No saved entries on this page. Send German text or a voice recording to add one."
+            )
+            return "No entries."
+        keyboard = InlineKeyboardMarkup()
+        for row in rows[:5]:
+            label = " ".join(row.german.split())[:60]
+            keyboard.add(InlineKeyboardButton(label, callback_data=f"entry:{row.id}"))
+        if page:
+            keyboard.add(InlineKeyboardButton("Previous", callback_data=f"library:{page - 1}"))
+        if len(rows) > 5:
+            keyboard.add(InlineKeyboardButton("Next", callback_data=f"library:{page + 1}"))
+        self.say(f"Your collection · Page {page + 1}", keyboard=keyboard)
+        return "Collection opened."
+
+    async def entry(self, value):
+        from uuid import UUID
+
+        from app.services.collections import get_owned_sentence
+
+        try:
+            sentence_id = UUID(value)
+        except ValueError:
+            self.say("Use /entry with a saved entry ID.")
+            return "Invalid entry."
+        row = await get_owned_sentence(self.session, self.incoming.actor_id, sentence_id)
+        if row is None:
+            self.say("Entry unavailable.")
+            return "Entry unavailable."
+        result = f"German:\n{row.german}\n\nEnglish:\n{row.english}"
+        for index in range(0, len(result), 4000):
+            self.say(result[index : index + 4000], key=f"entry:{index}")
+        return "Entry opened."
 
     def status_effect(self, operation):
         self.say(

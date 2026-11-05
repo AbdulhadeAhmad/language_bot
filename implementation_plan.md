@@ -10,10 +10,10 @@ Move each milestone through **Not started → In progress → Verification → D
 |---|---|---|
 | M0 — Specification and tracking | Done | [30 acceptance scenarios](docs/acceptance_scenarios.md) cover ownership, duplicates, privacy, copying, editing, deletion, and review behavior; checked against the revised specification. |
 | M1 — Runtime and model feasibility | In progress | [First server-run findings](docs/benchmark_findings_20261103.md): translation and three TTS voices completed. ASR rerun passed; [second-run findings](docs/benchmark_findings_20261104.md) compare accuracy and expanded TTS performance. [Round-two commands](benchmarks/README.md) compare six Piper variants and three Qwen3-TTS 0.6B speakers over 27 inputs. Quality, license review, and final selection remain pending. |
-| M2 — Async application foundation | Verification | Direct webhook/command handling replaces the inbox/outbox workers. 2026-11-05: 13 unit and 27 PostgreSQL integration tests pass; current deployment and real ASR/translation/TTS smoke checks pass. Fresh-deployment/recreation checks for the refactor and live Telegram acceptance remain unverified. [Operations](docs/operations.md). |
-| M3 — Collections and duplicate warnings | Not started | |
+| M2 — Async application foundation | Done | Owner accepted completion on 2026-11-05 after successfully testing live transcription and translation. Current deployment and model smoke checks passed; fresh-deployment/recreation checks for the latest refactor were not rerun. [Operations](docs/operations.md). |
+| M3 — Collections and duplicate warnings | Done | Personal sentence/media/voice schema, completed-capture migration, `/library` pagination, owner-only entry controls, normalized non-unique lookup, and private-safe advisory warnings implemented. 14 unit and 33 PostgreSQL integration tests pass, including concurrency, redelivery/retry idempotency, ownership, privacy, and migration preservation/rollback. Current deployment verified healthy with schema and collection smoke checks. |
 | M4 — Durable jobs and archive storage | In progress | Domain operations and three model-service queues implemented. Telegram archive lifecycle remains future work. |
-| M5 — Voice and text capture | In progress | German voice/text → translation pipeline implemented with one status message. Library integration, duplicate warnings, and archive handling remain. Bot audio generation/playback deferred. |
+| M5 — Voice and text capture | In progress | German voice/text → translation → saved personal entry implemented with one status message and advisory duplicate warnings. Original Telegram file references retained; archive handling remains. Bot audio generation/playback deferred. |
 | M6 — Editing and deletion | Not started | |
 | M7 — Privacy, discovery, and copying | Not started | |
 | M8 — Practice and FSRS | Not started | |
@@ -141,7 +141,7 @@ Each milestone closes only when its acceptance checks pass. M1 benchmarking cont
 - The project owner listens to the voice samples and accepts transcription/translation quality.
 - If no candidate meets the hardware or quality requirements, resolve that constraint before proceeding.
 
-### [ ] M2 — Establish the async application foundation
+### [x] M2 — Establish the async application foundation
 
 **Deliverables**
 
@@ -158,7 +158,7 @@ Each milestone closes only when its acceptance checks pass. M1 benchmarking cont
 - Repeated delivery of one capture produces one domain operation identified by chat and source message ID.
 - Health distinguishes a running process from a database-ready application.
 
-### [ ] M3 — Implement personal collections and duplicate warnings
+### [x] M3 — Implement personal collections and duplicate warnings
 
 **Deliverables**
 
@@ -198,8 +198,8 @@ Each milestone closes only when its acceptance checks pass. M1 benchmarking cont
 
 **Deliverables**
 
-- Current voice flow: transcribe → translate → show both texts in the original status message. Archive/library/duplicate-warning integration remains to be implemented.
-- Current text flow: translate → show both texts. TTS is independently available through its private API; bot audio generation/playback is deferred.
+- Current voice flow: transcribe → translate → save personal entry and show both texts in the original status message with accessible duplicate warnings. Archive integration remains to be implemented.
+- Current text flow: translate → save personal entry and show both texts. TTS is independently available through its private API; bot audio generation/playback is deferred.
 - One editable processing-status message with management controls.
 - Step-specific failure information and retry actions.
 - Maximum input length/duration enforcement.
@@ -441,3 +441,21 @@ Track each milestone as **Not started → In progress → Verification → Done*
 - Removed obsolete interaction/delivery worker containers using Compose's orphan cleanup. API, PostgreSQL, ASR, translation, and TTS are now healthy; migration exits successfully and the host API readiness endpoint returns ready.
 - Real private-API smoke checks passed: German text translated to English, Piper produced a valid WAV, and Whisper transcribed that WAV as “Guten Morgen, ich lerne Deutsch.” Released smoke-job input/output artifacts through the model APIs.
 - Verification: 13 unit tests and 27 integration tests against disposable PostgreSQL passed; downloader Ruff and whitespace checks passed. No live Telegram messages were sent. Fresh deployment/recreation and live Telegram acceptance for the latest architecture remain unverified, so M2 stays in Verification.
+
+### 2026-11-05 — Owner accepts M2; M3 implemented and verified
+
+- Owner confirmed live transcription and translation, accepted the remaining M2 verification as done, and authorized M3. Marked M2 complete by owner acceptance without claiming fresh-deployment/recreation checks were run.
+- Added user-owned sentences, optional immediate-copy provenance, configured voices, shared media references, and sentence-owned audio assets. Normalized German has a non-unique index; intentional identical submissions remain separate entries. Active generated assets are unique per sentence/voice.
+- Completed capture saves a sentence and any original Telegram file reference transactionally before the final message edit. Operation locking, claim-token fencing, and a unique capture identity prevent duplicate entries on recovery/retry. Archive uploads and generated playback remain later milestones.
+- Added private-by-default personal `/library` pagination, `/entry ID`, and entry/collection buttons on completed status messages. Entry queries include the requesting owner; callbacks recheck approval and ownership.
+- Duplicate checks use Unicode NFC and collapsed whitespace while preserving case and punctuation. Only the owner's entries and other users' public entries can produce warnings; no warning pauses processing. Simultaneous captures remain independent and warnings are best-effort.
+- Migration `0004_collections` preserves approvals and completed captures, including original recording references. Missing legacy user records default to private/pending; migration never grants access. Imported results do not get retroactive warnings.
+- Verification: 14 unit and 33 real-PostgreSQL integration tests passed, covering independent identical entries, private/public warnings, original media, concurrent submissions, fenced retries, and paginated owner-only commands/callbacks. Migration tests verify backfill and downgrade/re-upgrade preservation. Ruff and whitespace checks passed. Live deployment has not yet been upgraded to M3.
+
+### 2026-11-05 — M3 deployment verified
+
+- On resuming deployment work, discovered `0004_collections` was already applied. All three completed captures had saved entries, with one original recording asset; no completed captures were missing from the library. This supersedes the earlier deployment-pending note.
+- Created a safety backup of the current database at `/tmp/language-bot-before-m3-20261105.dump`, rebuilt current images, and reconciled/recreated the stack with `docker compose up -d --remove-orphans --wait --wait-timeout 180`. This backup already contains the M3 schema.
+- All five long-running services are healthy and migration exits successfully. `alembic check` reports no schema differences; host API readiness returns ready. Saved data remains present after recreation.
+- Deployed `/library`, entry details, and ownership isolation passed smoke checks against existing saved data with Telegram replies captured locally. No test messages were sent to Telegram.
+- Real translation, TTS WAV generation, and ASR transcription passed again through private HTTP services after recreation; smoke-job intermediate files were released through their APIs.

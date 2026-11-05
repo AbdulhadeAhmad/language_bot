@@ -1,6 +1,8 @@
 # Running the application
 
-The API handles commands and replies directly through AsyncTeleBot. Only domain operations are durable: German voice/text capture advances through transcription and translation using private model services. The same status message ends with both texts. TTS is available internally; bot audio generation/playback is deferred. Library management and reviews remain future work.
+The API handles commands and replies directly through AsyncTeleBot. German voice/text capture advances through transcription and translation using private model services, then saves an independent personal entry. The same status message ends with both texts and buttons to open the entry or collection. TTS is available internally; bot audio generation/playback is deferred. Editing, public discovery, and reviews remain future work.
+
+Use `/library` to browse your saved entries, or `/entry ID` to open one. Collections start private. Identical submissions remain separate; matches against your own or public entries produce a small advisory warning. Other users' private entries never trigger warnings. Migration `0004_collections` imports previously completed captures and original Telegram recording references. Archive upload/playback remains future work. Back up the database before upgrading, then use the normal image build and Compose startup commands below to apply the migration.
 
 ## External data setup
 

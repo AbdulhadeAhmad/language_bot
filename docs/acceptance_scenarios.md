@@ -9,7 +9,7 @@ These scenarios translate `implementation_plan.md` into observable outcomes. The
 | A03 | M3 | Alice intentionally sends identical German twice in different updates; Bob sends it too. | Three independently owned sentences. Detected accessible matches produce a small warning, never rejection or automatic merging. |
 | A04 | M3 | Compare `Ich  komme.` and ` Ich komme. `, composed/decomposed umlauts, `ich komme.`, and `Ich komme!`. | Whitespace and Unicode-equivalent forms match; case and punctuation differences do not. |
 | A05 | M3, M7 | Bob privately saves text that Alice later submits. | Alice gets no indication that Bob's private sentence exists. |
-| A06 | M5 | Alice submits text; Bob submits a voice note. | Independent persisted German/English operation results and one edited progress message each. Bot audio and archive/library integration are deferred. |
+| A06 | M3, M5 | Alice submits text; Bob submits a voice note. | Independent saved German/English entries and one edited progress message each, with advisory duplicate warnings where applicable. Bot audio and archive integration are deferred. |
 | A07 | M5 | One generated voice fails; translation or ASR fails in separate cases. | Successful work remains saved; retry only the failed work. No false READY status. |
 | A08 | M4, M5 | Inference is busy while the other user opens settings or a saved entry. | Interaction handling remains responsive and is not awaiting inference. |
 | A09 | M5 | Submit 1,000/1,001 characters and voice notes of 120/121 seconds. | Boundary inputs are accepted; over-limit inputs are rejected before expensive work. |

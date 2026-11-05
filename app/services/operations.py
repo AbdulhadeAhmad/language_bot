@@ -11,6 +11,7 @@ from sqlalchemy.dialects.postgresql import insert
 
 from app.bot.transport import MissingStatusMessage
 from app.db.models import Operation, User
+from app.services.collections import DUPLICATE_WARNING, save_capture
 
 logger = logging.getLogger(__name__)
 LEASE_SECONDS = 60
@@ -139,12 +140,19 @@ class OperationRunner:
                 if not result.rowcount:
                     return
 
-    async def render(self, row, text):
+    async def render(self, row, text, sentence_id=None):
+        payload = {"chat_id": row.chat_id, "message_id": row.status_message_id, "text": text}
+        if sentence_id is not None:
+            payload["reply_markup"] = {
+                "inline_keyboard": [
+                    [
+                        {"text": "Open saved entry", "callback_data": f"entry:{sentence_id}"},
+                        {"text": "My collection", "callback_data": "library:0"},
+                    ]
+                ]
+            }
         async with asyncio.timeout(self.settings.telegram_timeout_seconds):
-            await self.transport.send(
-                "edit_message_text",
-                {"chat_id": row.chat_id, "message_id": row.status_message_id, "text": text},
-            )
+            await self.transport.send("edit_message_text", payload)
 
     async def process_one(self):
         row = await self.claim()
@@ -188,12 +196,18 @@ class OperationRunner:
                         available_at=func.now(),
                     )
                 else:
+                    async with self.database.sessions.begin() as session:
+                        sentence = await save_capture(session, row)
+                    if sentence is None:
+                        return True
                     result = f"German:\n{row.german}\n\nEnglish:\n{row.english}"
-                    if len(result) > 4000:
+                    if len(result) > 3800:
                         german = row.german[:1800] + ("…" if len(row.german) > 1800 else "")
                         english = row.english[:1800] + ("…" if len(row.english) > 1800 else "")
                         result = f"German:\n{german}\n\nEnglish:\n{english}\n\nFull text: /result {row.id}"
-                    await self.render(row, result)
+                    if sentence.duplicate_warning:
+                        result += f"\n\n{DUPLICATE_WARNING}"
+                    await self.render(row, result, sentence.id)
                     await self.finish(row, state="done", error_type=None)
         except Exception as exc:
             permanent = isinstance(exc, (ValueError, MissingStatusMessage)) or row.attempts >= 3
