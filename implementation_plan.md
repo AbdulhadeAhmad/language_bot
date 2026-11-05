@@ -12,8 +12,8 @@ Move each milestone through **Not started → In progress → Verification → D
 | M1 — Runtime and model feasibility | In progress | [First server-run findings](docs/benchmark_findings_20261103.md): translation and three TTS voices completed. ASR rerun passed; [second-run findings](docs/benchmark_findings_20261104.md) compare accuracy and expanded TTS performance. [Round-two commands](benchmarks/README.md) compare six Piper variants and three Qwen3-TTS 0.6B speakers over 27 inputs. Quality, license review, and final selection remain pending. |
 | M2 — Async application foundation | Done | Owner accepted completion on 2026-11-05 after successfully testing live transcription and translation. Current deployment and model smoke checks passed; fresh-deployment/recreation checks for the latest refactor were not rerun. [Operations](docs/operations.md). |
 | M3 — Collections and duplicate warnings | Done | Personal sentence/media/voice schema, completed-capture migration, `/library` pagination, owner-only entry controls, normalized non-unique lookup, and private-safe advisory warnings implemented. 14 unit and 33 PostgreSQL integration tests pass, including concurrency, redelivery/retry idempotency, ownership, privacy, and migration preservation/rollback. Current deployment verified healthy with schema and collection smoke checks. |
-| M4 — Durable jobs and archive storage | Verification | Opt-in archive queue, migration/backfill, server-side media adapter, leases/heartbeats, bounded retries, orphan logging, and owner-only retry controls implemented. 17 unit and 40 PostgreSQL integration tests pass. Deployed schema matches code and services are healthy; 3 archive jobs remain pending with zero attempts. Live copying remains disabled pending explicit approval of the configured archive destination. |
-| M5 — Voice and text capture | In progress | German voice/text → translation → saved personal entry implemented with one status message and advisory duplicate warnings. Original Telegram references retained; opt-in archive implementation awaits activation. Playback controls and bot TTS generation/playback remain deferred. |
+| M4 — Durable jobs and archive storage | Done | Archive queue, migration/backfill, server-side media adapter, leases/heartbeats, bounded retries, orphan logging, and owner-only retry controls implemented. 17 unit and 40 PostgreSQL integration tests pass. Owner explicitly approved and activated copying to the configured private channel; 4 live recordings archived successfully in one attempt each, with no duplicate assets/receipts. All services healthy and deployed schema matches code. |
+| M5 — Voice and text capture | In progress | German voice/text → translation → saved personal entry implemented with one status message and advisory duplicate warnings. Original recordings now archive to the approved private channel. Playback controls and bot TTS generation/playback remain deferred. |
 | M6 — Editing and deletion | Not started | |
 | M7 — Privacy, discovery, and copying | Not started | |
 | M8 — Practice and FSRS | Not started | |
@@ -176,7 +176,7 @@ Each milestone closes only when its acceptance checks pass. M1 benchmarking cont
 - Capitalization and punctuation differences remain distinct.
 - Users cannot read or modify another user’s private entry by manipulating callback IDs.
 
-### [ ] M4 — Build durable jobs and archive storage
+### [x] M4 — Build durable jobs and archive storage
 
 **Deliverables**
 
@@ -198,7 +198,7 @@ Each milestone closes only when its acceptance checks pass. M1 benchmarking cont
 
 **Deliverables**
 
-- Current voice flow: transcribe → translate → save personal entry and show both texts in the original status message with accessible duplicate warnings. Original recording archive jobs are implemented but disabled pending destination approval.
+- Current voice flow: transcribe → translate → save personal entry and show both texts in the original status message with accessible duplicate warnings. Original recording archive jobs copy to the approved private storage channel independently of translation.
 - Current text flow: translate → save personal entry and show both texts. TTS is independently available through its private API; bot audio generation/playback is deferred.
 - One editable processing-status message with management controls.
 - Step-specific failure information and retry actions.
@@ -474,3 +474,11 @@ Track each milestone as **Not started → In progress → Verification → Done*
 - On resuming, found migration `0005_archive_jobs` and the M4 images already deployed. Read-only verification confirmed five saved sentences, three original-recording assets, and three pending archive jobs with zero attempts and no archive receipts.
 - Deployed `alembic check` reports no schema differences and API readiness returns ready. The configured destination remains the previously inspected private channel; `TELEGRAM_ARCHIVE_ENABLED` remains false.
 - Automatic approval review rejected the activation attempt because “Continue working” was not accepted as explicit approval of the recording payload and Telegram destination. No activation command ran, no external configuration was changed, and no recordings were copied. Live archive validation remains pending explicit owner approval.
+
+### 2026-11-05 — Owner approves archive activation; M4 complete
+
+- Owner explicitly approved copying existing and future original voice/audio recordings, with captions removed, into the configured private Telegram archive channel. Set `TELEGRAM_ARCHIVE_ENABLED=true` in the external configuration and recreated the stack successfully.
+- Before activation, created permission-restricted database and configuration backups under the external data root: `backups/before-m4-activation-20261105T125142Z.dump` and `.env` with the same filename stem. Configuration contents and credentials were not printed.
+- Four archive jobs, including a new recording queued during activation, completed in one attempt each. All four media records have receipts in the approved destination. Checks found no duplicate active original-media assets or duplicate archive message receipts; no upload errors appeared in fresh API logs.
+- All five long-running services are healthy, migration exits successfully, `alembic check` reports no schema differences, and API readiness returns ready. The enabled flag and configured destination were checked inside the running API.
+- M4 acceptance is supported by the previous 17 unit/40 PostgreSQL integration results plus successful live archive copies. Original-recording playback controls and bot-generated TTS remain M5 follow-up work rather than claims of completed playback.
