@@ -10,7 +10,7 @@ Move each milestone through **Not started → In progress → Verification → D
 |---|---|---|
 | M0 — Specification and tracking | Done | [30 acceptance scenarios](docs/acceptance_scenarios.md) cover ownership, duplicates, privacy, copying, editing, deletion, and review behavior; checked against the revised specification. |
 | M1 — Runtime and model feasibility | In progress | [First server-run findings](docs/benchmark_findings_20261103.md): translation and three TTS voices completed. ASR rerun passed; [second-run findings](docs/benchmark_findings_20261104.md) compare accuracy and expanded TTS performance. [Round-two commands](benchmarks/README.md) compare six Piper variants and three Qwen3-TTS 0.6B speakers over 27 inputs. Quality, license review, and final selection remain pending. |
-| M2 — Async application foundation | Verification | Direct webhook/command handling replaces the inbox/outbox workers. Refactor tests pass; final container verification in progress. [Operations](docs/operations.md). |
+| M2 — Async application foundation | Verification | Direct webhook/command handling replaces the inbox/outbox workers. 2026-11-05: 13 unit and 27 PostgreSQL integration tests pass; current deployment and real ASR/translation/TTS smoke checks pass. Fresh-deployment/recreation checks for the refactor and live Telegram acceptance remain unverified. [Operations](docs/operations.md). |
 | M3 — Collections and duplicate warnings | Not started | |
 | M4 — Durable jobs and archive storage | In progress | Domain operations and three model-service queues implemented. Telegram archive lifecycle remains future work. |
 | M5 — Voice and text capture | In progress | German voice/text → translation pipeline implemented with one status message. Library integration, duplicate warnings, and archive handling remain. Bot audio generation/playback deferred. |
@@ -432,3 +432,12 @@ Track each milestone as **Not started → In progress → Verification → Done*
 - Voice/text capture now advances through transcription (voice only), translation, and a final edit showing both texts. Owner explicitly deferred generated audio/playback in bot responses; TTS's internal API is implemented independently.
 - Added an irreversible upgrade migration preserving user approvals, audit records, and channel references while removing old inbox/outbox payload tables. Backup instructions are in the operations guide.
 - Verification underway: initial unit and integration suites passed; final migration, cleanup, image build, and service smoke checks are pending before completion is recorded.
+
+### 2026-11-05 — Current deployment repaired and verified
+
+- Inspected Compose logs: the external model directory was empty, causing ASR/translation local-model failures and a missing Piper configuration. Prepared all three pinned runtime models.
+- Fixed the runtime downloader's file filter to include `.txt` files; Whisper small requires `vocabulary.txt`, which the previous filter omitted. Rebuilt the preparation image and fetched the missing vocabulary.
+- Backed up the current database to `/tmp/language-bot-before-deployment-fix-20261105.dump` before restarting the stack; confirmed migration `0003_operations` was already applied. This local temporary backup is not an off-host recovery backup.
+- Removed obsolete interaction/delivery worker containers using Compose's orphan cleanup. API, PostgreSQL, ASR, translation, and TTS are now healthy; migration exits successfully and the host API readiness endpoint returns ready.
+- Real private-API smoke checks passed: German text translated to English, Piper produced a valid WAV, and Whisper transcribed that WAV as “Guten Morgen, ich lerne Deutsch.” Released smoke-job input/output artifacts through the model APIs.
+- Verification: 13 unit tests and 27 integration tests against disposable PostgreSQL passed; downloader Ruff and whitespace checks passed. No live Telegram messages were sent. Fresh deployment/recreation and live Telegram acceptance for the latest architecture remain unverified, so M2 stays in Verification.

@@ -57,7 +57,9 @@ def main():
             model["repository"],
             revision=model["revision"],
             local_dir=root / name,
-            allow_patterns=["*.json", "*.spm", "*.bin", "*.safetensors", "README*", "LICENSE*"],
+            allow_patterns=[
+                "*.json", "*.txt", "*.spm", "*.bin", "*.safetensors", "README*", "LICENSE*"
+            ],
         )
     if "tts" in args.only:
         model = models["tts"]
