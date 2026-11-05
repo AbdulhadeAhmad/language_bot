@@ -13,7 +13,7 @@ Move each milestone through **Not started → In progress → Verification → D
 | M2 — Async application foundation | Done | Owner accepted completion on 2026-11-05 after successfully testing live transcription and translation. Current deployment and model smoke checks passed; fresh-deployment/recreation checks for the latest refactor were not rerun. [Operations](docs/operations.md). |
 | M3 — Collections and duplicate warnings | Done | Personal sentence/media/voice schema, completed-capture migration, `/library` pagination, owner-only entry controls, normalized non-unique lookup, and private-safe advisory warnings implemented. 14 unit and 33 PostgreSQL integration tests pass, including concurrency, redelivery/retry idempotency, ownership, privacy, and migration preservation/rollback. Current deployment verified healthy with schema and collection smoke checks. |
 | M4 — Durable jobs and archive storage | Done | Archive queue, migration/backfill, server-side media adapter, leases/heartbeats, bounded retries, orphan logging, and owner-only retry controls implemented. 17 unit and 40 PostgreSQL integration tests pass. Owner explicitly approved and activated copying to the configured private channel; 4 live recordings archived successfully in one attempt each, with no duplicate assets/receipts. All services healthy and deployed schema matches code. |
-| M5 — Voice and text capture | Verification | Capture/library/archive flow and original playback deployed healthy. Opt-in generated speech includes synthesis/upload recovery, MP3 transport, and archived playback. 22 unit and 48 PostgreSQL integration tests pass; real long-text Piper/MP3 and deployed private MP3 endpoint checks pass. Generated uploads remain disabled pending explicit payload/destination approval and live generated-audio verification. |
+| M5 — Voice and text capture | Done | Capture/library/archive flow, original playback, and on-demand Thorsten speech generation deployed healthy. 22 unit and 48 PostgreSQL integration tests pass. Owner explicitly approved generated-audio activation; live synthesis, MP3 archive upload/read-back, owner playback controls, and model-file cleanup verified. Multi-user/discovery behavior will be extended at M7. |
 | M6 — Editing and deletion | Not started | |
 | M7 — Privacy, discovery, and copying | Not started | |
 | M8 — Practice and FSRS | Not started | |
@@ -61,7 +61,7 @@ Run these services:
 - **ASR / translation / TTS:** separate private HTTP services, each owning a PostgreSQL-backed inference queue and one CPU consumer. Model inference runs outside the HTTP event loop.
 - **PostgreSQL:** users, domain state, processing operations, and model jobs. Never store raw incoming Telegram update payloads or generic command-delivery work.
 
-A voice capture persists only IDs/references and required step data. The bot immediately sends one status message; the operation progresses through transcription → translation → completed German/English text, updating that same message. Archived originals are playable by their owner. Generated German audio is optional and requested separately from saved entries; its activation flag remains off until the generated payload and archive destination are explicitly approved.
+A voice capture persists only IDs/references and required step data. The bot immediately sends one status message; the operation progresses through transcription → translation → completed German/English text, updating that same message. Archived originals are playable by their owner. Generated German audio is optional and requested separately from saved entries; generated MP3s use the explicitly approved private archive and are playable only by their owner until discovery is implemented.
 
 Each task uses its own async SQLAlchemy session. Transactions stay short and do not span network or model calls. Model-service jobs and capture operations have leases, heartbeats, retry limits, and fenced result writes. Retries use stable model request IDs; manual operation retry starts a new request generation. Only the bot API has outward networking; model APIs are Docker-network-only.
 
@@ -194,12 +194,12 @@ Each milestone closes only when its acceptance checks pass. M1 benchmarking cont
 - Temporary files are removed after success and failure; startup cleanup removes abandoned files.
 - An uncertain Telegram upload result may leave an orphan archive message, but cannot create duplicate active database assets. Log such cases for cleanup.
 
-### [ ] M5 — Deliver voice and text capture
+### [x] M5 — Deliver voice and text capture
 
 **Deliverables**
 
 - Current voice flow: transcribe → translate → save personal entry and show both texts in the original status message with accessible duplicate warnings. Original recording archive jobs copy to the approved private storage channel independently of translation.
-- Current text flow: translate → save personal entry and show both texts. Opt-in, on-demand German audio generation and archived playback are implemented; activation awaits explicit approval of generated-audio storage.
+- Current text flow: translate → save personal entry and show both texts. On-demand German audio generation and archived playback are active following owner approval of generated-audio storage.
 - One editable processing-status message with management controls.
 - Step-specific failure information and retry actions.
 - Maximum input length/duration enforcement.
@@ -494,3 +494,11 @@ Track each milestone as **Not started → In progress → Verification → Done*
 - Real isolated Piper validation synthesized two chunks into an 85.51-second WAV, encoded a 684,717-byte MP3, decoded the same duration, and removed temporary output. This used generic German test text and sent nothing to Telegram.
 - Backed up the live database to `backups/before-m5-20261105T131012Z.dump` under the external data root and deployed migration `0006_audio_jobs` with generated uploads verified disabled. All five long-running services are healthy and deployed `alembic check` reports no differences.
 - Deployed original entry/playback callbacks and ownership checks passed with replies captured locally. The deployed private MP3 endpoint returned 15,213 bytes for generic test speech, then released its WAV via DELETE. No generated audio jobs/assets or Telegram uploads exist. Original playback is available through `/library`; live generated-audio upload/playback validation remains pending activation approval.
+
+### 2026-11-05 — Owner approves generated audio; M5 complete
+
+- Owner explicitly approved enabling on-demand Thorsten TTS, storing generated MP3s from saved German text in the configured private archive, and owner-only playback. Enabled `TELEGRAM_TTS_ENABLED=true` in external configuration and recreated only the API; all model services remained available.
+- Before activation, created permission-restricted database/configuration backups under the external data root: `backups/before-tts-activation-20261105T143741Z.dump` and `.env` with the same filename stem. No credentials/configuration contents were printed.
+- Requested audio for one existing administrator-owned entry. Live synthesis/upload completed successfully, the archive receipt was saved, and the 6,765-byte MP3 was read back from Telegram using its stored file reference. The temporary model WAV was released after persistence.
+- Owner-only playback queries and the enabled Play German audio entry/callback controls passed verification with playback effects captured locally. No extra playback message was sent during this check. Original and generated audio playback use archived references rather than repeating inference.
+- All five long-running services are healthy, API readiness returns ready, and deployed `alembic check` reports no schema differences. Together with the recorded 22 unit/48 PostgreSQL tests and long-text real-codec checks, this completes M5's current capture/playback scope. M7 will extend validation to public discovery controls and its multi-user scenarios.
