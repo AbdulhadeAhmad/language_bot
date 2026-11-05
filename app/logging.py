@@ -18,6 +18,11 @@ FIELDS = (
     "media_id",
     "archive_chat_id",
     "archive_message_id",
+    "caption_present",
+    "caption_matches",
+    "caption_has_hashtags",
+    "title_matches",
+    "file_name_matches",
 )
 
 

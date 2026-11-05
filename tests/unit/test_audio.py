@@ -47,6 +47,7 @@ async def test_generated_upload_uses_mp3_and_releases_memory_buffer():
     async def send(channel, upload, **kwargs):
         assert channel == -10088 and kwargs["caption"] == "archive metadata"
         assert kwargs["title"] == "Guten Morgen." and kwargs["performer"] == "Thorsten Medium"
+        assert kwargs["parse_mode"] == "HTML"
         assert kwargs["disable_notification"]
         streams.append(upload.file)
         assert upload.file.read() == b"mp3 audio"
@@ -59,7 +60,8 @@ async def test_generated_upload_uses_mp3_and_releases_memory_buffer():
         caption="archive metadata",
         title="Guten Morgen.",
         performer="Thorsten Medium",
-        file_name="german-de_DE-thorsten-medium.mp3",
+        file_name="Guten Morgen.mp3",
+        parse_mode="HTML",
     ) == UploadedAudio(7, "saved-audio")
     assert streams[0].closed
     await transport.close()
@@ -73,17 +75,52 @@ def test_audio_rate_limit_preserves_retry_after():
 
 
 def test_archive_metadata_keeps_ids_when_long_german_is_shortened():
+    import re
+    from html import unescape
     from uuid import uuid4
 
     from app.services.audio import archive_audio_metadata
 
-    sentence = SimpleNamespace(id=uuid4(), user_id=12345, revision=2, german="Grüße 😊 " * 2000)
+    sentence = SimpleNamespace(
+        id=uuid4(),
+        user_id=12345,
+        revision=2,
+        german="Grüße 😊 " * 2000,
+        english="Greetings <from> Berlin & elsewhere. " * 1000,
+    )
     asset = SimpleNamespace(id=uuid4())
     voice = SimpleNamespace(id="de_DE-thorsten-medium", provider="piper")
     metadata = archive_audio_metadata(sentence, asset, voice)
-    assert len(metadata["caption"].encode("utf-16-le")) // 2 <= 1024
-    assert f"Sentence ID: {sentence.id}" in metadata["caption"]
-    assert "User ID: 12345" in metadata["caption"] and "Revision: 2" in metadata["caption"]
-    assert str(asset.id) in metadata["caption"] and "de_DE-thorsten-medium" in metadata["caption"]
+    visible_caption = unescape(re.sub(r"</?b>", "", metadata["caption"]))
+    assert len(visible_caption.encode("utf-16-le")) // 2 <= 1024
+    assert f"#sentence_{sentence.id.hex}" in metadata["caption"]
+    assert "#user_12345" in metadata["caption"] and "#revision_2" in metadata["caption"]
+    assert asset.id.hex in metadata["caption"] and "#de_DE_thorsten_medium" in metadata["caption"]
+    assert "<b>English</b>" in metadata["caption"] and "&lt;from&gt;" in metadata["caption"]
+    assert "&amp;" in metadata["caption"] and "#piper" in metadata["caption"]
+    assert metadata["parse_mode"] == "HTML"
     assert "…" in metadata["caption"]
     assert "12345" not in metadata["title"] + metadata["performer"] + metadata["file_name"]
+
+
+def test_archive_labels_use_german_filename_and_escape_user_text():
+    from uuid import uuid4
+
+    from app.services.audio import archive_audio_metadata
+
+    sentence = SimpleNamespace(
+        id=uuid4(),
+        user_id=12,
+        revision=1,
+        german='Grüße <aus> Berlin & "Welt".',
+        english="Greetings from Berlin & the world.",
+    )
+    metadata = archive_audio_metadata(
+        sentence,
+        SimpleNamespace(id=uuid4()),
+        SimpleNamespace(id="de_DE-thorsten-medium", provider="piper"),
+    )
+    assert metadata["title"] == sentence.german
+    assert metadata["file_name"] == "Grüße aus Berlin & Welt.mp3"
+    assert "&lt;aus&gt;" in metadata["caption"] and "&quot;Welt&quot;" in metadata["caption"]
+    assert "Greetings from Berlin &amp; the world." in metadata["caption"]

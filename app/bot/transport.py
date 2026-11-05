@@ -1,11 +1,16 @@
 import io
+import logging
+import re
 from dataclasses import dataclass
+from html import unescape
 from typing import Protocol
 
 from telebot.apihelper import ApiTelegramException as SyncApiTelegramException
 from telebot.async_telebot import AsyncTeleBot
 from telebot.asyncio_helper import ApiTelegramException, session_manager
 from telebot.types import InlineKeyboardMarkup, InputFile, ReplyParameters
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -98,6 +103,7 @@ class BotTransport:
         title: str,
         performer: str,
         file_name: str,
+        parse_mode: str,
     ) -> UploadedAudio:
         try:
             with io.BytesIO(audio) as stream:
@@ -105,6 +111,7 @@ class BotTransport:
                     channel_id,
                     InputFile(stream, file_name=file_name),
                     caption=caption,
+                    parse_mode=parse_mode,
                     title=title,
                     performer=performer,
                     disable_notification=True,
@@ -113,6 +120,22 @@ class BotTransport:
                 error = ConnectionError("Audio receipt unavailable")
                 error.message_id = message.message_id
                 raise error
+            logger.info(
+                "archive_audio_metadata_confirmed",
+                extra={
+                    "archive_chat_id": channel_id,
+                    "archive_message_id": message.message_id,
+                    "caption_present": bool(getattr(message, "caption", None)),
+                    "caption_matches": getattr(message, "caption", None)
+                    == unescape(re.sub(r"</?b>", "", caption)),
+                    "caption_has_hashtags": any(
+                        entity.type == "hashtag"
+                        for entity in (getattr(message, "caption_entities", None) or [])
+                    ),
+                    "title_matches": getattr(message.audio, "title", None) == title,
+                    "file_name_matches": getattr(message.audio, "file_name", None) == file_name,
+                },
+            )
             return UploadedAudio(message.message_id, message.audio.file_id)
         except (ApiTelegramException, SyncApiTelegramException) as exc:
             delivery_error(exc)

@@ -2,8 +2,10 @@
 
 import asyncio
 import logging
+import re
 from contextlib import suppress
 from datetime import timedelta
+from html import escape
 from uuid import uuid4
 
 import httpx
@@ -25,19 +27,41 @@ def clip_telegram_text(text, limit):
 
 
 def archive_audio_metadata(sentence, asset, voice):
-    voice_name = voice.id.split("-", 1)[-1].replace("-", " ").title()
-    header = "Generated German audio\n\nGerman:\n"
-    footer = (
-        f"\n\nVoice: {voice_name} ({voice.id})\nProvider: {voice.provider}"
-        f"\nSentence ID: {sentence.id}\nUser ID: {sentence.user_id}"
-        f"\nRevision: {sentence.revision}\nAudio ID: {asset.id}"
-    )
-    remaining = 1024 - len((header + footer).encode("utf-16-le")) // 2
+    voice_name = voice.id.split("-", 1)[-1].replace("-", " ").replace("_", " ").title()
+
+    def tag(value):
+        return "#" + re.sub(r"\W+", "_", str(value))
+
+    fields = [
+        ("Voice", f"{voice_name} {tag(voice.id)}"),
+        ("Provider", tag(voice.provider)),
+        ("Sentence", tag(f"sentence_{sentence.id.hex}")),
+        ("User", tag(f"user_{sentence.user_id}")),
+        ("Audio", tag(f"audio_{asset.id.hex}")),
+        ("Revision", tag(f"revision_{sentence.revision}")),
+    ]
+    footer_plain = "\n\n" + "\n".join(f"{label}: {value}" for label, value in fields)
+    overhead = "German\n\n\nEnglish\n" + footer_plain
+    remaining = 1024 - len(overhead.encode("utf-16-le")) // 2
+    german_length = len(sentence.german.encode("utf-16-le")) // 2
+    english_length = len(sentence.english.encode("utf-16-le")) // 2
+    german_limit = min(german_length, remaining // 2)
+    english_limit = min(english_length, remaining - german_limit)
+    german_limit = min(german_length, remaining - english_limit)
+    footer = "\n\n" + "\n".join(f"<b>{label}:</b> {escape(value)}" for label, value in fields)
+    title = " ".join(sentence.german.split())
+    filename = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "", title).strip(" .")
+    filename = filename.encode("utf-8")[:200].decode("utf-8", errors="ignore") or "German sentence"
     return {
-        "caption": header + clip_telegram_text(sentence.german, remaining) + footer,
-        "title": clip_telegram_text(" ".join(sentence.german.split()), 80),
+        "caption": (
+            f"<b>German</b>\n{escape(clip_telegram_text(sentence.german, german_limit))}"
+            f"\n\n<b>English</b>\n{escape(clip_telegram_text(sentence.english, english_limit))}"
+            + footer
+        ),
+        "parse_mode": "HTML",
+        "title": title,
         "performer": clip_telegram_text(voice_name, 64),
-        "file_name": f"german-{voice.id}.mp3",
+        "file_name": f"{filename}.mp3",
     }
 
 

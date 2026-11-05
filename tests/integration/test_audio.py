@@ -94,9 +94,13 @@ async def test_generation_is_opt_in_and_duplicate_requests_share_one_asset(db, c
     assert len(models.generated) == 1 and len(transport.uploaded) == 1
     assert transport.uploaded[0][0] == -10088
     assert sentence.german in transport.metadata[0]["caption"]
-    assert f"Sentence ID: {sentence.id}" in transport.metadata[0]["caption"]
-    assert f"User ID: {sentence.user_id}" in transport.metadata[0]["caption"]
-    assert "de_DE-thorsten-medium" in transport.metadata[0]["caption"]
+    assert f"#sentence_{sentence.id.hex}" in transport.metadata[0]["caption"]
+    assert f"#user_{sentence.user_id}" in transport.metadata[0]["caption"]
+    assert "#de_DE_thorsten_medium" in transport.metadata[0]["caption"]
+    assert sentence.english in transport.metadata[0]["caption"]
+    assert transport.metadata[0]["parse_mode"] == "HTML"
+    assert transport.metadata[0]["title"] == sentence.german
+    assert transport.metadata[0]["file_name"] == "Guten Morgen.mp3"
     assert models.discarded == [assets[0].id]
     assert transport.sent[-1][0] == "edit_message_reply_markup"
     async with db.sessions() as session:
