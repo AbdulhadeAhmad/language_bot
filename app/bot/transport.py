@@ -64,13 +64,16 @@ class BotTransport:
             if method == "edit_message_reply_markup":
                 result = await self.bot.edit_message_reply_markup(**payload)
                 return getattr(result, "message_id", None)
+            if method == "edit_message_caption":
+                result = await self.bot.edit_message_caption(**payload)
+                return getattr(result, "message_id", None)
             if method == "edit_message_text":
                 result = await self.bot.edit_message_text(**payload)
                 return getattr(result, "message_id", None)
             raise RejectedDelivery("Unsupported delivery method")
         except (ApiTelegramException, SyncApiTelegramException) as exc:
             if (
-                method in {"edit_message_text", "edit_message_reply_markup"}
+                method in {"edit_message_text", "edit_message_reply_markup", "edit_message_caption"}
                 and exc.error_code == 400
                 and "message is not modified" in exc.description.lower()
             ):
@@ -86,15 +89,24 @@ class BotTransport:
                 raise MissingStatusMessage("Status message unavailable") from None
             delivery_error(exc)
 
-    async def upload_audio(self, channel_id: int, audio: bytes) -> UploadedAudio:
+    async def upload_audio(
+        self,
+        channel_id: int,
+        audio: bytes,
+        *,
+        caption: str,
+        title: str,
+        performer: str,
+        file_name: str,
+    ) -> UploadedAudio:
         try:
             with io.BytesIO(audio) as stream:
                 message = await self.bot.send_audio(
                     channel_id,
-                    InputFile(stream, file_name="german.mp3"),
-                    caption="",
-                    title="German pronunciation",
-                    performer="Thorsten",
+                    InputFile(stream, file_name=file_name),
+                    caption=caption,
+                    title=title,
+                    performer=performer,
                     disable_notification=True,
                 )
             if not message.audio or not message.audio.file_id:

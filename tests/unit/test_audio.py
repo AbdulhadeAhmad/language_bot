@@ -45,14 +45,22 @@ async def test_generated_upload_uses_mp3_and_releases_memory_buffer():
     streams = []
 
     async def send(channel, upload, **kwargs):
-        assert channel == -10088 and kwargs["caption"] == ""
+        assert channel == -10088 and kwargs["caption"] == "archive metadata"
+        assert kwargs["title"] == "Guten Morgen." and kwargs["performer"] == "Thorsten Medium"
         assert kwargs["disable_notification"]
         streams.append(upload.file)
         assert upload.file.read() == b"mp3 audio"
         return SimpleNamespace(message_id=7, audio=SimpleNamespace(file_id="saved-audio"))
 
     transport.bot.send_audio = AsyncMock(side_effect=send)
-    assert await transport.upload_audio(-10088, b"mp3 audio") == UploadedAudio(7, "saved-audio")
+    assert await transport.upload_audio(
+        -10088,
+        b"mp3 audio",
+        caption="archive metadata",
+        title="Guten Morgen.",
+        performer="Thorsten Medium",
+        file_name="german-de_DE-thorsten-medium.mp3",
+    ) == UploadedAudio(7, "saved-audio")
     assert streams[0].closed
     await transport.close()
 
@@ -62,3 +70,20 @@ def test_audio_rate_limit_preserves_retry_after():
     with pytest.raises(RetryAfter) as caught:
         delivery_error(error)
     assert caught.value.seconds == 45
+
+
+def test_archive_metadata_keeps_ids_when_long_german_is_shortened():
+    from uuid import uuid4
+
+    from app.services.audio import archive_audio_metadata
+
+    sentence = SimpleNamespace(id=uuid4(), user_id=12345, revision=2, german="Grüße 😊 " * 2000)
+    asset = SimpleNamespace(id=uuid4())
+    voice = SimpleNamespace(id="de_DE-thorsten-medium", provider="piper")
+    metadata = archive_audio_metadata(sentence, asset, voice)
+    assert len(metadata["caption"].encode("utf-16-le")) // 2 <= 1024
+    assert f"Sentence ID: {sentence.id}" in metadata["caption"]
+    assert "User ID: 12345" in metadata["caption"] and "Revision: 2" in metadata["caption"]
+    assert str(asset.id) in metadata["caption"] and "de_DE-thorsten-medium" in metadata["caption"]
+    assert "…" in metadata["caption"]
+    assert "12345" not in metadata["title"] + metadata["performer"] + metadata["file_name"]

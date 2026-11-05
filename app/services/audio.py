@@ -10,11 +10,35 @@ import httpx
 from sqlalchemy import and_, func, or_, select, update
 
 from app.bot.transport import RejectedDelivery, RetryAfter
-from app.db.models import AudioAsset, AudioJob, Sentence, StoredMedia, User
+from app.db.models import AudioAsset, AudioJob, Sentence, StoredMedia, User, Voice
 from app.services.archive import copy_payload
 
 logger = logging.getLogger(__name__)
 DEFAULT_VOICE = "de_DE-thorsten-medium"
+
+
+def clip_telegram_text(text, limit):
+    encoded = text.encode("utf-16-le")
+    if len(encoded) <= limit * 2:
+        return text
+    return encoded[: (limit - 1) * 2].decode("utf-16-le", errors="ignore") + "…"
+
+
+def archive_audio_metadata(sentence, asset, voice):
+    voice_name = voice.id.split("-", 1)[-1].replace("-", " ").title()
+    header = "Generated German audio\n\nGerman:\n"
+    footer = (
+        f"\n\nVoice: {voice_name} ({voice.id})\nProvider: {voice.provider}"
+        f"\nSentence ID: {sentence.id}\nUser ID: {sentence.user_id}"
+        f"\nRevision: {sentence.revision}\nAudio ID: {asset.id}"
+    )
+    remaining = 1024 - len((header + footer).encode("utf-16-le")) // 2
+    return {
+        "caption": header + clip_telegram_text(sentence.german, remaining) + footer,
+        "title": clip_telegram_text(" ".join(sentence.german.split()), 80),
+        "performer": clip_telegram_text(voice_name, 64),
+        "file_name": f"german-{voice.id}.mp3",
+    }
 
 
 async def generated_audio(session, user_id, sentence_id):
@@ -256,6 +280,7 @@ class AudioRunner:
                 asset = await session.get(AudioAsset, job.asset_id)
                 sentence = await session.get(Sentence, asset.sentence_id)
                 user = await session.get(User, sentence.user_id)
+                voice = await session.get(Voice, asset.voice_id)
             if not asset.active or sentence.revision != job.sentence_revision:
                 await self.finish(job, state="cancelled", error_type="ObsoleteRevision")
                 return True
@@ -272,7 +297,11 @@ class AudioRunner:
                     audio = await self.models.speech_audio(job)
                     async with asyncio.timeout(self.settings.telegram_timeout_seconds):
                         upload_started = True
-                        receipt = await self.transport.upload_audio(job.target_chat_id, audio)
+                        receipt = await self.transport.upload_audio(
+                            job.target_chat_id,
+                            audio,
+                            **archive_audio_metadata(sentence, asset, voice),
+                        )
                     if await self.finish(job, state="done", receipt=receipt):
                         with suppress(Exception):
                             await self.models.discard_speech(job)

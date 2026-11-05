@@ -22,7 +22,7 @@ Migration `0006_audio_jobs` adds a durable on-demand synthesis/upload queue. Mul
 
 Successful upload stores the Telegram file/archive references and releases the temporary model WAV through the model API. The completed capture's buttons are updated to offer Play German audio; if that message is unavailable, reopening the entry provides the same control. Playback reuses the archive receipt and never reruns TTS. Failed upload preserves text/translation and successful synthesis; the entry shows the failed step and an owner-only retry button. Expired intermediate model output triggers synthesis under a new stable request identity. Leases, heartbeats, revision/claim fencing, bounded retries, and uncertain-upload logging follow the original archive policy.
 
-Disabling TTS stops new generation requests/claims after API recreation; archived audio remains playable by its owner. Storage messages have a generic title/voice name and an empty caption. Generated audio activation and any live upload test must use the explicitly approved channel.
+Disabling TTS stops new generation requests/claims after API recreation; archived audio remains playable by its owner. Generated storage messages use the German sentence as the audio title and the voice name as performer. Private archive captions include the German text, voice/provider, sentence ID, user ID, revision, and audio asset ID. Long German text is shortened to fit Telegram's caption limit while retaining all metadata fields. User IDs appear only in the archive caption; playback strips that caption. Generated audio activation and any live upload test must use the explicitly approved channel.
 
 ## External data setup
 

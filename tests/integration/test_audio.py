@@ -38,9 +38,11 @@ class SpeechTransport(RecordingTransport):
     def __init__(self):
         super().__init__()
         self.uploaded, self.upload_error = [], None
+        self.metadata = []
 
-    async def upload_audio(self, channel, audio):
+    async def upload_audio(self, channel, audio, **metadata):
         self.uploaded.append((channel, audio))
+        self.metadata.append(metadata)
         if self.upload_error:
             raise self.upload_error
         return UploadedAudio(401, "generated-file")
@@ -91,6 +93,10 @@ async def test_generation_is_opt_in_and_duplicate_requests_share_one_asset(db, c
     await AudioRunner(db, config, transport, models).process_one()
     assert len(models.generated) == 1 and len(transport.uploaded) == 1
     assert transport.uploaded[0][0] == -10088
+    assert sentence.german in transport.metadata[0]["caption"]
+    assert f"Sentence ID: {sentence.id}" in transport.metadata[0]["caption"]
+    assert f"User ID: {sentence.user_id}" in transport.metadata[0]["caption"]
+    assert "de_DE-thorsten-medium" in transport.metadata[0]["caption"]
     assert models.discarded == [assets[0].id]
     assert transport.sent[-1][0] == "edit_message_reply_markup"
     async with db.sessions() as session:
