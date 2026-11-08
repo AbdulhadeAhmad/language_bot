@@ -4,7 +4,8 @@ from sqlalchemy import select
 
 from app.db.models import AudioAsset, Sentence, StoredMedia, User
 from app.services.audio import playback_payload
-from app.services.discovery import search_public
+from app.services.deletion import delete_sentence
+from app.services.discovery import copy_public_sentence, search_public, set_privacy
 
 from .test_foundation import RecordingTransport, dispatch, payload
 
@@ -130,3 +131,62 @@ async def test_public_search_paginates_and_rechecks_visibility(db, config):
         callback(user_id, "search:1", "Public search: Hallo"),
     )
     assert transport.sent[-2][1]["text"].endswith("No public entries found.")
+
+
+async def test_repeated_copies_keep_immediate_provenance_and_shared_audio(db):
+    source_id, media_id = uuid4(), uuid4()
+    async with db.sessions.begin() as session:
+        session.add_all([
+            User(id=410, status="approved", private=True),
+            User(id=420, status="approved", private=True),
+        ])
+        await session.flush()
+        session.add(Sentence(
+            id=source_id,
+            user_id=410,
+            german="Ich lerne Deutsch.",
+            english="I am learning German.",
+            normalized_german="Ich lerne Deutsch.",
+        ))
+        await session.flush()
+        session.add(StoredMedia(
+            id=media_id,
+            telegram_file_id="shared-generated",
+            archive_chat_id=-10088,
+            archive_message_id=840,
+        ))
+        await session.flush()
+        session.add(AudioAsset(
+            id=uuid4(), sentence_id=source_id, stored_media_id=media_id,
+            kind="generated", state="ready", voice_id="de_DE-thorsten-medium",
+        ))
+        await set_privacy(session, 410, private=False)
+        first = await copy_public_sentence(session, 420, source_id)
+        second = await copy_public_sentence(session, 420, source_id)
+        assert first.id != second.id
+        assert first.copied_from_sentence_id == source_id
+        assert second.copied_from_sentence_id == source_id
+        assert first.duplicate_warning and second.duplicate_warning
+        assert await set_privacy(session, 420, private=False) is False
+        third = await copy_public_sentence(session, 410, first.id)
+        assert third.copied_from_sentence_id == first.id
+
+        assert await delete_sentence(session, 410, source_id)
+        await session.flush()
+        assert await delete_sentence(session, 420, first.id)
+
+    async with db.sessions() as session:
+        copies = (await session.scalars(
+            select(Sentence).where(Sentence.id.in_([first.id, second.id, third.id]))
+        )).all()
+        assert len(copies) == 2
+        assert {row.id for row in copies} == {second.id, third.id}
+        assert all(row.copied_from_sentence_id is None for row in copies)
+        generated = (await session.scalars(
+            select(AudioAsset).where(
+                AudioAsset.sentence_id.in_([second.id, third.id]),
+                AudioAsset.stored_media_id == media_id,
+                AudioAsset.active.is_(True),
+            )
+        )).all()
+        assert len(generated) == 2
