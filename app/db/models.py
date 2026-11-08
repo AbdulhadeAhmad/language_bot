@@ -94,6 +94,7 @@ class StoredMedia(Base):
     telegram_file_id: Mapped[str] = mapped_column(String)
     archive_chat_id: Mapped[int | None] = mapped_column(BigInteger)
     archive_message_id: Mapped[int | None] = mapped_column(BigInteger)
+    delete_pending: Mapped[bool] = mapped_column(Boolean, server_default="false")
 
 
 class AudioAsset(Base):
@@ -149,6 +150,25 @@ class ArchiveJob(Base):
     lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     claim_token: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class MediaDeletionJob(Base):
+    __tablename__ = "media_deletion_jobs"
+    __table_args__ = (
+        CheckConstraint("state IN ('pending','running','done','failed','cancelled')", name="media_deletion_job_state"),
+        Index("ix_media_deletion_jobs_ready", "state", "available_at"),
+    )
+    media_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("stored_media.id", ondelete="CASCADE"), primary_key=True
+    )
+    target_chat_id: Mapped[int | None] = mapped_column(BigInteger)
+    target_message_id: Mapped[int | None] = mapped_column(BigInteger)
+    state: Mapped[str] = mapped_column(String(16), server_default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, server_default="0")
+    error_type: Mapped[str | None] = mapped_column(String(100))
+    available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    claim_token: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
 
 
 class AudioJob(Base):

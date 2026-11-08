@@ -6,9 +6,18 @@ import httpx
 from sqlalchemy import func, select
 
 from app.bot.transport import UploadedAudio
-from app.db.models import AudioAsset, AudioJob, ModelJob, Sentence, StoredMedia, User
+from app.db.models import (
+    AudioAsset,
+    AudioJob,
+    MediaDeletionJob,
+    ModelJob,
+    Sentence,
+    StoredMedia,
+    User,
+)
 from app.providers.http import ModelClient
 from app.services.audio import AudioRunner, playback_payload, request_audio
+from app.services.deletion import MediaDeletionRunner
 
 from .test_collections import capture
 from .test_foundation import RecordingTransport, dispatch, payload
@@ -133,6 +142,87 @@ async def test_generate_missing_voices_is_idempotent_for_configured_voices(db, c
             AudioAsset.kind == "generated",
             AudioAsset.active.is_(True),
         )) == 1
+
+
+async def test_audio_deletion_waits_for_last_active_reference(db, config):
+    sentence = await setup_speech(db, config)
+    asset = await request(db, config, sentence)
+    transport, models = SpeechTransport(), SpeechModels()
+    audio_runner = AudioRunner(db, config, transport, models)
+    await audio_runner.process_one()
+    await audio_runner.process_one()
+    async with db.sessions.begin() as session:
+        first = await session.get(AudioAsset, asset.id)
+        media = await session.get(StoredMedia, first.stored_media_id)
+        session.add(User(id=22, status="approved"))
+        await session.flush()
+        copied = Sentence(
+            id=uuid4(), user_id=22, german=sentence.german, english=sentence.english,
+            normalized_german=sentence.normalized_german,
+        )
+        session.add(copied)
+        await session.flush()
+        shared_asset = AudioAsset(
+            id=uuid4(), sentence_id=copied.id, stored_media_id=media.id,
+            voice_id=asset.voice_id, kind="generated", state="ready",
+        )
+        session.add(shared_asset)
+
+    await dispatch(db, config, transport, callback(11, f"deleteaudio:{asset.id}"))
+    async with db.sessions() as session:
+        assert not (await session.get(AudioAsset, asset.id)).active
+        assert await session.get(StoredMedia, media.id)
+        assert await session.get(MediaDeletionJob, media.id) is None
+
+    await dispatch(db, config, transport, callback(22, f"deleteaudio:{shared_asset.id}"))
+    async with db.sessions() as session:
+        cleanup = await session.get(MediaDeletionJob, media.id)
+        assert cleanup and cleanup.state == "pending"
+        assert (await session.get(StoredMedia, media.id)).delete_pending
+    assert await MediaDeletionRunner(db, config, transport).process_one()
+    async with db.sessions() as session:
+        assert await session.get(StoredMedia, media.id) is None
+        assert (await session.get(AudioAsset, asset.id)).stored_media_id is None
+        assert (await session.get(AudioAsset, shared_asset.id)).stored_media_id is None
+    assert any(method == "delete_message" for method, _ in transport.sent)
+
+
+async def test_voice_regeneration_keeps_old_audio_until_replacement_is_ready(db, config):
+    sentence = await setup_speech(db, config)
+    old_asset = await request(db, config, sentence)
+    transport, models = SpeechTransport(), SpeechModels()
+    runner = AudioRunner(db, config, transport, models)
+    await runner.process_one()
+    await runner.process_one()
+    async with db.sessions.begin() as session:
+        replacement = await request_audio(
+            session, config, 11, sentence.id, old_asset.voice_id, regenerate=True
+        )
+        assert replacement.id != old_asset.id
+        assert not replacement.active and replacement.replacement
+    async with db.sessions() as session:
+        assert (await session.get(AudioAsset, old_asset.id)).active
+    models.synthesis_error = ValueError("replacement synthesis failed")
+    await runner.process_one()
+    async with db.sessions() as session:
+        assert (await session.get(AudioAsset, old_asset.id)).active
+        failed_replacement = await session.get(AudioAsset, replacement.id)
+        assert not failed_replacement.active and failed_replacement.state == "failed"
+    models.synthesis_error = None
+    async with db.sessions.begin() as session:
+        retried = await request_audio(
+            session, config, 11, sentence.id, old_asset.voice_id, regenerate=True
+        )
+        assert retried.id == replacement.id
+    await runner.process_one()
+    assert await runner.process_one()
+    async with db.sessions() as session:
+        old = await session.get(AudioAsset, old_asset.id)
+        current = await session.get(AudioAsset, replacement.id)
+        cleanup = await session.get(MediaDeletionJob, old.stored_media_id)
+        assert not old.active and old.state == "ready"
+        assert current.active and not current.replacement and current.state == "ready"
+        assert cleanup and cleanup.state == "pending"
 async def test_audio_callbacks_check_approval_ownership_and_reuse_archive(db, config):
     sentence = await setup_speech(db, config)
     async with db.sessions.begin() as session:

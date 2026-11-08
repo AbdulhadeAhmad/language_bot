@@ -79,7 +79,21 @@ async def generated_audio(session, user_id, sentence_id, voice_id=DEFAULT_VOICE)
     )
 
 
-async def request_audio(session, settings, user_id, sentence_id, voice_id=DEFAULT_VOICE):
+async def staged_generated_audio(session, sentence_id, voice_id):
+    return await session.scalar(
+        select(AudioAsset).where(
+            AudioAsset.sentence_id == sentence_id,
+            AudioAsset.kind == "generated",
+            AudioAsset.voice_id == voice_id,
+            AudioAsset.active.is_(False),
+            AudioAsset.replacement.is_(True),
+        )
+    )
+
+
+async def request_audio(
+    session, settings, user_id, sentence_id, voice_id=DEFAULT_VOICE, *, regenerate=False
+):
     if not settings.telegram_tts_enabled:
         return None
     sentence = await session.scalar(
@@ -101,6 +115,26 @@ async def request_audio(session, settings, user_id, sentence_id, voice_id=DEFAUL
         asset.active = False
         await session.flush()
         asset, job = None, None
+    if regenerate and asset and asset.state == "ready":
+        staged = await staged_generated_audio(session, sentence.id, voice_id)
+        staged_job = await session.get(AudioJob, staged.id) if staged else None
+        if staged and staged_job and staged_job.state in {"pending", "running"}:
+            return staged
+        if staged and staged_job and staged_job.state == "failed":
+            staged_job.generation += 1
+            staged_job.state, staged_job.attempts, staged_job.error_type = "pending", 0, None
+            staged_job.claim_token, staged_job.lease_until = None, None
+            staged_job.available_at = func.now()
+            staged.state = "generating"
+            return staged
+        staged = AudioAsset(
+            id=uuid4(), sentence_id=sentence.id, voice_id=voice_id, kind="generated",
+            state="generating", active=False, replacement=True,
+        )
+        session.add(staged)
+        await session.flush()
+        session.add(AudioJob(asset_id=staged.id, sentence_revision=sentence.revision))
+        return staged
     if asset is None:
         asset = AudioAsset(
             id=uuid4(),
@@ -135,6 +169,7 @@ async def playback_payload(session, user_id, asset_id):
             AudioAsset.state == "ready",
             Sentence.user_id == user_id,
             StoredMedia.archive_message_id.is_not(None),
+            StoredMedia.delete_pending.is_(False),
             StoredMedia.archive_chat_id.is_not(None),
         )
     )
@@ -209,9 +244,9 @@ class AudioRunner:
                 return False
             asset = await session.get(AudioAsset, job.asset_id)
             job.claim_token, job.lease_until = None, None
-            if sentence is None or not asset.active or sentence.revision != job.sentence_revision:
+            if sentence is None or not (asset.active or asset.replacement) or sentence.revision != job.sentence_revision:
                 job.state, job.error_type = "cancelled", "ObsoleteRevision"
-                asset.active = False
+                asset.active, asset.replacement = False, False
                 return False
             job.state, job.error_type = state, error_type
             job.uncertain = job.uncertain or uncertain
@@ -230,6 +265,24 @@ class AudioRunner:
                 session.add(media)
                 await session.flush()
                 asset.stored_media_id, asset.state = media.id, "ready"
+                if asset.replacement and asset.kind == "generated":
+                    previous = (await session.scalars(
+                        select(AudioAsset).where(
+                            AudioAsset.sentence_id == sentence.id,
+                            AudioAsset.kind == "generated",
+                            AudioAsset.voice_id == asset.voice_id,
+                            AudioAsset.active.is_(True),
+                            AudioAsset.id != asset.id,
+                        ).with_for_update()
+                    )).all()
+                    for old_asset in previous:
+                        old_media_id = old_asset.stored_media_id
+                        old_asset.active = False
+                        if old_media_id:
+                            from app.services.deletion import _schedule_media_cleanup
+
+                            await _schedule_media_cleanup(session, old_media_id)
+                    asset.active, asset.replacement = True, False
             else:
                 asset.state = (
                     "failed"
@@ -308,7 +361,7 @@ class AudioRunner:
                 sentence = await session.get(Sentence, asset.sentence_id)
                 user = await session.get(User, sentence.user_id)
                 voice = await session.get(Voice, asset.voice_id)
-            if not asset.active or sentence.revision != job.sentence_revision:
+            if not (asset.active or asset.replacement) or sentence.revision != job.sentence_revision:
                 await self.finish(job, state="cancelled", error_type="ObsoleteRevision")
                 return True
             if sentence.user_id != self.settings.admin_telegram_id and user.status != "approved":

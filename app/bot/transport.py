@@ -66,6 +66,8 @@ class BotTransport:
             if method == "copy_message":
                 result = await self.bot.copy_message(**payload)
                 return result.message_id
+            if method == "delete_message":
+                return int(bool(await self.bot.delete_message(**payload)))
             if method == "edit_message_reply_markup":
                 result = await self.bot.edit_message_reply_markup(**payload)
                 return getattr(result, "message_id", None)
@@ -77,6 +79,12 @@ class BotTransport:
                 return getattr(result, "message_id", None)
             raise RejectedDelivery("Unsupported delivery method")
         except (ApiTelegramException, SyncApiTelegramException) as exc:
+            if (
+                method == "delete_message"
+                and exc.error_code == 400
+                and "message to delete not found" in exc.description.lower()
+            ):
+                return 1
             if (
                 method in {"edit_message_text", "edit_message_reply_markup", "edit_message_caption"}
                 and exc.error_code == 400

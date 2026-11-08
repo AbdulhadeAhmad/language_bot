@@ -136,6 +136,12 @@ class ArchiveRunner:
             )
             if job is None:
                 return False
+            if state == "done":
+                media = await session.get(StoredMedia, job.media_id, with_for_update=True)
+                if media is None or media.delete_pending:
+                    job.state, job.error_type = "failed", "media_deletion_pending"
+                    job.claim_token, job.lease_until = None, None
+                    return False
             job.state, job.error_type = state, error_type
             job.uncertain = job.uncertain or uncertain
             job.claim_token, job.lease_until = None, None

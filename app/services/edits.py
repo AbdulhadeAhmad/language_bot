@@ -97,12 +97,30 @@ class EditRunner:
                         AudioAsset.active.is_(True),
                     )
                 )).all()
+                voices_to_regenerate = set()
                 for asset in assets:
                     asset.active = False
+                    if asset.voice_id and self.settings.telegram_tts_enabled:
+                        voices_to_regenerate.add(asset.voice_id)
+                    if asset.stored_media_id:
+                        from app.services.deletion import _schedule_media_cleanup
+
+                        await _schedule_media_cleanup(session, asset.stored_media_id)
                     audio_job = await session.get(AudioJob, asset.id, with_for_update=True)
                     if audio_job and audio_job.state in {"pending", "running"}:
                         audio_job.state, audio_job.error_type = "cancelled", "sentence_edited"
                         audio_job.claim_token, audio_job.lease_until = None, None
+                await session.flush()
+                for voice_id in voices_to_regenerate:
+                    replacement = AudioAsset(
+                        id=uuid4(), sentence_id=sentence.id, voice_id=voice_id,
+                        kind="generated", state="generating",
+                    )
+                    session.add(replacement)
+                    await session.flush()
+                    session.add(AudioJob(
+                        asset_id=replacement.id, sentence_revision=sentence.revision
+                    ))
                 current.state, current.claim_token, current.lease_until = "done", None, None
                 current.error_type = None
                 user_id = sentence.user_id

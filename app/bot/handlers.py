@@ -194,7 +194,7 @@ class Handlers:
 
     async def callback(self, callback):
         if (callback.data or "").startswith(
-            ("library:", "entry:", "archive:", "generate:", "generateall:", "play:", "edit:", "editen:", "replace:")
+            ("library:", "entry:", "archive:", "generate:", "generateall:", "regenerate:", "play:", "edit:", "editen:", "replace:", "deleteaudio:", "deleteentry:", "confirmdelete:", "canceldelete:")
         ):
             user = await self.session.get(User, callback.from_user.id)
             approved = callback.from_user.id == self.settings.admin_telegram_id or (
@@ -211,6 +211,8 @@ class Handlers:
                     answer = await self.generate_audio(value)
                 elif command == "generateall":
                     answer = await self.generate_all_audio(value)
+                elif command == "regenerate":
+                    answer = await self.regenerate_audio(value)
                 elif command == "play":
                     answer = await self.play_audio(value)
                 elif command == "edit":
@@ -219,6 +221,14 @@ class Handlers:
                     answer = await self.begin_edit(value, field="english")
                 elif command == "replace":
                     answer = await self.begin_recording_replace(value)
+                elif command == "deleteaudio":
+                    answer = await self.remove_audio(value)
+                elif command == "deleteentry":
+                    answer = await self.confirm_entry_deletion(value)
+                elif command == "confirmdelete":
+                    answer = await self.remove_entry(value)
+                elif command == "canceldelete":
+                    answer = "Entry deletion cancelled."
                 else:
                     answer = await self.archive_retry(value)
             self.emit(
@@ -546,6 +556,9 @@ class Handlers:
                         "Play original recording", callback_data=f"play:{asset.id}"
                     )
                 )
+            keyboard.add(InlineKeyboardButton(
+                "Delete original recording", callback_data=f"deleteaudio:{asset.id}"
+            ))
         if self.settings.telegram_archive_enabled:
             from app.db.models import AudioAsset
 
@@ -568,26 +581,42 @@ class Handlers:
                 InlineKeyboardButton("Replace original recording", callback_data=f"replace:{row.id}")
             )
         from app.db.models import Voice
-        from app.services.audio import generated_audio
+        from app.services.audio import generated_audio, staged_generated_audio
 
         voices = (await self.session.scalars(select(Voice).order_by(Voice.id))).all()
         for voice in voices:
             generated = await generated_audio(
                 self.session, self.incoming.actor_id, row.id, voice.id
             )
+            staged = await staged_generated_audio(self.session, row.id, voice.id)
             voice_name = voice.id.split("-", 1)[-1].replace("-", " ").replace("_", " ").title()
-            if generated and generated.state == "ready":
+            if staged:
+                result += f"\n\n{voice_name} replacement audio: {staged.state}."
+                if staged.state == "failed":
+                    keyboard.add(InlineKeyboardButton(
+                        f"Retry {voice_name} replacement", callback_data=f"regenerate:{row.id}:{voice.id}"
+                    ))
+            elif generated and generated.state == "ready":
                 keyboard.add(InlineKeyboardButton(
                     f"Play {voice_name}", callback_data=f"play:{generated.id}"
+                ))
+                keyboard.add(InlineKeyboardButton(
+                    f"Regenerate {voice_name}", callback_data=f"regenerate:{row.id}:{voice.id}"
                 ))
             elif self.settings.telegram_tts_enabled:
                 if generated and generated.state == "failed":
                     result += f"\n\nCould not generate {voice_name} audio. Your text and translation are saved."
                 elif generated:
                     result += f"\n\n{voice_name} audio: {generated.state}."
-                label = f"Retry {voice_name}" if generated else f"Generate {voice_name}"
+                if not generated or generated.state == "failed":
+                    label = f"Retry {voice_name}" if generated else f"Generate {voice_name}"
+                    keyboard.add(InlineKeyboardButton(
+                        label, callback_data=f"generate:{row.id}:{voice.id}"
+                    ))
+            if generated or staged:
+                target = staged or generated
                 keyboard.add(InlineKeyboardButton(
-                    label, callback_data=f"generate:{row.id}:{voice.id}"
+                    f"Delete {voice_name} audio", callback_data=f"deleteaudio:{target.id}"
                 ))
         if self.settings.telegram_tts_enabled and voices:
             keyboard.add(InlineKeyboardButton(
@@ -596,6 +625,7 @@ class Handlers:
         keyboard.add(InlineKeyboardButton("Refresh entry", callback_data=f"entry:{row.id}"))
         keyboard.add(InlineKeyboardButton("Edit German", callback_data=f"edit:{row.id}"))
         keyboard.add(InlineKeyboardButton("Edit English", callback_data=f"editen:{row.id}"))
+        keyboard.add(InlineKeyboardButton("Delete entry", callback_data=f"deleteentry:{row.id}"))
         for index in range(0, len(result), 4000):
             self.say(
                 result[index : index + 4000],
@@ -603,6 +633,58 @@ class Handlers:
                 keyboard=keyboard if index == 0 else None,
             )
         return "Entry opened."
+
+    async def remove_audio(self, value):
+        from uuid import UUID
+
+        from app.services.deletion import delete_audio
+
+        try:
+            asset_id = UUID(value)
+        except ValueError:
+            return "Audio unavailable."
+        if not await delete_audio(self.session, self.incoming.actor_id, asset_id):
+            return "Audio unavailable."
+        self.say("Audio removed from this entry. Unshared archived media will be cleaned up.")
+        return "Audio removed."
+
+    async def confirm_entry_deletion(self, value):
+        from uuid import UUID
+
+        from app.services.collections import get_owned_sentence
+
+        try:
+            sentence_id = UUID(value)
+        except ValueError:
+            return "Entry unavailable."
+        sentence = await get_owned_sentence(self.session, self.incoming.actor_id, sentence_id)
+        if sentence is None:
+            return "Entry unavailable."
+        keyboard = InlineKeyboardMarkup()
+        keyboard.add(
+            InlineKeyboardButton("Confirm deletion", callback_data=f"confirmdelete:{sentence.id}"),
+            InlineKeyboardButton("Keep entry", callback_data=f"canceldelete:{sentence.id}"),
+        )
+        self.say(
+            "Delete this entry and its audio? Shared recordings remain available to other entries.",
+            key=f"confirm-delete:{sentence.id}",
+            keyboard=keyboard,
+        )
+        return "Confirm entry deletion."
+
+    async def remove_entry(self, value):
+        from uuid import UUID
+
+        from app.services.deletion import delete_sentence
+
+        try:
+            sentence_id = UUID(value)
+        except ValueError:
+            return "Entry unavailable."
+        if not await delete_sentence(self.session, self.incoming.actor_id, sentence_id):
+            return "Entry unavailable."
+        self.say("Entry deleted. Unshared archived recordings will be cleaned up.")
+        return "Entry deleted."
 
     async def begin_edit(self, value, field="german"):
         from uuid import UUID
@@ -715,6 +797,32 @@ class Handlers:
                 )
                 queued += bool(asset and asset.state != "ready")
         return f"Queued {queued} missing voice(s). Refresh the entry to check progress."
+
+    async def regenerate_audio(self, value):
+        from uuid import UUID
+
+        from app.services.audio import request_audio
+
+        if not self.settings.telegram_tts_enabled:
+            return "German audio generation is not enabled yet."
+        parts = value.split(":", 1)
+        try:
+            sentence_id = UUID(parts[0])
+        except ValueError:
+            return "Entry unavailable."
+        if len(parts) != 2:
+            return "Voice unavailable."
+        asset = await request_audio(
+            self.session,
+            self.settings,
+            self.incoming.actor_id,
+            sentence_id,
+            parts[1],
+            regenerate=True,
+        )
+        if asset is None:
+            return "Entry unavailable."
+        return "Replacement audio queued. The current recording remains available until the new audio is ready."
 
     async def play_audio(self, value):
         from uuid import UUID

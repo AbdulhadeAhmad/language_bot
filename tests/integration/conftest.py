@@ -40,7 +40,7 @@ async def db(database_url):
     async with database.engine.begin() as connection:
         await connection.execute(
             text(
-                "TRUNCATE audio_jobs, archive_jobs, audio_assets, stored_media, sentence_edit_jobs, interaction_states, sentences, model_jobs, operations, access_changes, users RESTART IDENTITY"
+                "TRUNCATE audio_jobs, archive_jobs, media_deletion_jobs, audio_assets, stored_media, sentence_edit_jobs, interaction_states, sentences, model_jobs, operations, access_changes, users RESTART IDENTITY"
             )
         )
     yield database

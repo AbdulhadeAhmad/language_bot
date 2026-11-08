@@ -8,6 +8,7 @@ from app.db.models import (
     AudioAsset,
     AudioJob,
     InteractionState,
+    MediaDeletionJob,
     Operation,
     Sentence,
     SentenceEditJob,
@@ -22,6 +23,7 @@ from app.services.collections import (
     normalize_german,
     save_capture,
 )
+from app.services.deletion import MediaDeletionRunner
 from app.services.edits import EditRunner
 from app.services.operations import OperationRunner, retry_operation
 
@@ -175,6 +177,7 @@ async def test_library_pagination_entry_callbacks_and_access_checks(db, config):
 
 
 async def test_german_edit_translates_durably_and_revision_fences_audio(db, config):
+    config.telegram_tts_enabled = True
     sentence_id, asset_id = uuid4(), uuid4()
     async with db.sessions.begin() as session:
         session.add_all([User(id=11, status="approved"), User(id=22, status="approved")])
@@ -228,6 +231,14 @@ async def test_german_edit_translates_durably_and_revision_fences_audio(db, conf
         assert sentence.revision == 2 and not sentence.duplicate_warning
         assert asset.active is False and job.state == "cancelled"
         assert edit_job.state == "done"
+        replacement = await session.scalar(select(AudioAsset).where(
+            AudioAsset.sentence_id == sentence_id,
+            AudioAsset.kind == "generated",
+            AudioAsset.active.is_(True),
+        ))
+        replacement_job = await session.get(AudioJob, replacement.id)
+        assert replacement.state == "generating" and replacement_job.state == "pending"
+        assert replacement_job.sentence_revision == sentence.revision
 
 
 async def test_stale_sentence_edit_result_cannot_overwrite_newer_revision(db, config):
@@ -247,3 +258,62 @@ async def test_stale_sentence_edit_result_cannot_overwrite_newer_revision(db, co
         job = await session.get(SentenceEditJob, sentence_id)
         assert sentence.german == "Alt" and sentence.english == "Old"
         assert job.state == "cancelled"
+
+
+async def test_entry_deletion_requires_confirmation_and_cleans_unshared_media(db, config):
+    sentence_id, copied_id, media_id, asset_id = uuid4(), uuid4(), uuid4(), uuid4()
+    async with db.sessions.begin() as session:
+        session.add(User(id=11, status="approved"))
+        await session.flush()
+        source = Sentence(
+            id=sentence_id, user_id=11, german="Weg damit.", english="Delete this.",
+            normalized_german="Weg damit.",
+        )
+        session.add(source)
+        await session.flush()
+        session.add(Sentence(
+            id=copied_id, user_id=11, german="Weg damit.", english="Delete this.",
+            normalized_german="Weg damit.", copied_from_sentence_id=sentence_id,
+        ))
+        session.add(StoredMedia(
+            id=media_id, telegram_file_id="archived-audio",
+            archive_chat_id=-10088, archive_message_id=900,
+        ))
+        await session.flush()
+        session.add(AudioAsset(
+            id=asset_id, sentence_id=sentence_id, stored_media_id=media_id,
+            kind="original", state="ready",
+        ))
+
+    def callback(data):
+        return {
+            "update_id": 151,
+            "callback_query": {
+                "id": "delete-entry", "chat_instance": "test", "data": data,
+                "from": {"id": 11, "is_bot": False, "first_name": "Test"},
+                "message": payload(user=11)["message"],
+            },
+        }
+
+    transport = RecordingTransport()
+    await dispatch(db, config, transport, callback(f"deleteentry:{sentence_id}"))
+    prompt = next(data for method, data in transport.sent if method == "send_message" and "Delete this entry" in data["text"])
+    cancel = prompt["reply_markup"]["inline_keyboard"][0][1]["callback_data"]
+    await dispatch(db, config, transport, callback(cancel))
+    async with db.sessions() as session:
+        assert await session.get(Sentence, sentence_id)
+        assert await session.get(MediaDeletionJob, media_id) is None
+
+    await dispatch(db, config, transport, callback(f"deleteentry:{sentence_id}"))
+    prompt = [data for method, data in transport.sent if method == "send_message" and "Delete this entry" in data["text"]][-1]
+    confirm = prompt["reply_markup"]["inline_keyboard"][0][0]["callback_data"]
+    await dispatch(db, config, transport, callback(confirm))
+    async with db.sessions() as session:
+        assert await session.get(Sentence, sentence_id) is None
+        copied = await session.get(Sentence, copied_id)
+        assert copied and copied.copied_from_sentence_id is None
+        assert await session.get(MediaDeletionJob, media_id)
+    assert await MediaDeletionRunner(db, config, transport).process_one()
+    async with db.sessions() as session:
+        assert await session.get(StoredMedia, media_id) is None
+    assert any(method == "delete_message" and data["message_id"] == 900 for method, data in transport.sent)
