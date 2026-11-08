@@ -34,6 +34,7 @@ class Sentence(Base):
     normalized_german: Mapped[str] = mapped_column(String, index=True)
     english: Mapped[str] = mapped_column(String)
     revision: Mapped[int] = mapped_column(Integer, server_default="1")
+    review_revision: Mapped[int] = mapped_column(Integer, server_default="1")
     state: Mapped[str] = mapped_column(String(16), server_default="ready")
     duplicate_warning: Mapped[bool] = mapped_column(Boolean, server_default="false")
     copied_from_sentence_id: Mapped[UUID | None] = mapped_column(
@@ -207,6 +208,8 @@ class User(Base):
         CheckConstraint(
             "status IN ('pending','approved','rejected','revoked')", name="user_status"
         ),
+        CheckConstraint("new_cards_per_day BETWEEN 0 AND 100", name="user_new_cards_per_day"),
+        CheckConstraint("review_session_limit BETWEEN 1 AND 100", name="user_review_session_limit"),
     )
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
     first_name: Mapped[str | None] = mapped_column(String)
@@ -220,6 +223,8 @@ class User(Base):
     approval_message_id: Mapped[int | None] = mapped_column(BigInteger)
     approval_notice_state: Mapped[str] = mapped_column(String(16), server_default="pending")
     version: Mapped[int] = mapped_column(Integer, server_default="0")
+    new_cards_per_day: Mapped[int] = mapped_column(Integer, server_default="10")
+    review_session_limit: Mapped[int] = mapped_column(Integer, server_default="20")
 
 
 class ReviewCard(Base):
@@ -261,6 +266,11 @@ class ReviewSession(Base):
     current_sentence_id: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("sentences.id", ondelete="SET NULL")
     )
+    current_audio_asset_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("audio_assets.id", ondelete="SET NULL")
+    )
+    awaiting_answer: Mapped[bool] = mapped_column(Boolean, server_default="false")
+    submitted_answer: Mapped[str | None] = mapped_column(String)
     question_number: Mapped[int] = mapped_column(Integer, server_default="0")
     question_revision: Mapped[int | None] = mapped_column(Integer)
     questions_answered: Mapped[int] = mapped_column(Integer, server_default="0")

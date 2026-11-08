@@ -54,5 +54,5 @@ async def ensure_review_cards(session, sentence: Sentence, now: datetime | None 
                 mode=mode,
                 card_state=new_card(now),
                 due_at=now,
-                content_revision=sentence.revision,
+                content_revision=sentence.review_revision,
             ))

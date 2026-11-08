@@ -87,6 +87,12 @@ class EditRunner:
                 sentence.normalized_german = normalize_german(current.german)
                 sentence.english = english.strip()
                 sentence.revision = current.target_revision
+                sentence.review_revision += 1
+                from app.services.reviews import reset_review_schedules
+
+                await reset_review_schedules(session, sentence, (
+                    "de_to_en", "en_to_de", "dictation", "listening"
+                ))
                 sentence.duplicate_warning = await has_duplicate(
                     session, sentence.user_id, current.german, exclude_id=sentence.id
                 )

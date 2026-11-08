@@ -362,6 +362,15 @@ class Handlers:
                 return
             await self.start_practice(command[1])
             return
+        if command and command[0] == "/reviewlimits":
+            await self.review_limits(text, user)
+            return
+        if command and command[0] == "/cancelpractice":
+            from app.services.reviews import cancel_session
+
+            cancelled = await cancel_session(self.session, message.from_user.id)
+            self.say("Practice session cancelled." if cancelled else "No active practice session.")
+            return
         if text.strip() == "/cancel":
             await self.session.execute(
                 delete(InteractionState).where(InteractionState.user_id == message.from_user.id)
@@ -434,6 +443,14 @@ class Handlers:
             value = message.text.strip()
             if edit.step == "english":
                 sentence.english = value
+                sentence.review_revision += 1
+                from app.services.reviews import reset_review_schedules
+
+                await reset_review_schedules(
+                    self.session,
+                    sentence,
+                    ("de_to_en", "en_to_de", "listening"),
+                )
                 await self.session.delete(edit)
                 self.say("English translation updated. German audio is unchanged.")
                 await self.entry(str(sentence.id))
@@ -458,6 +475,10 @@ class Handlers:
             await self.session.delete(edit)
             self.say("Translating your edit. The saved entry stays unchanged until translation succeeds.")
             return
+        if text and not text.startswith("/"):
+            result = await self.submit_review_answer(text)
+            if result:
+                return
         if command and command[0] == "/entry":
             await self.entry(command[1] if len(command) == 2 else "")
             return
@@ -1047,7 +1068,7 @@ class Handlers:
         )
         return "Copied to your collection."
 
-    def review_question(self, review_session, sentence):
+    async def review_question(self, review_session, sentence):
         from html import escape
 
         mode = review_session.mode
@@ -1055,6 +1076,27 @@ class Handlers:
             heading, prompt, answer = "German → English", sentence.german, sentence.english
         elif mode == "en_to_de":
             heading, prompt, answer = "English → German", sentence.english, sentence.german
+        elif mode in {"dictation", "listening"}:
+            from app.services.audio import playback_payload
+
+            audio_payload = await playback_payload(
+                self.session, self.incoming.actor_id, review_session.current_audio_asset_id
+            )
+            if audio_payload is None:
+                self.say("The selected audio is no longer available. Start a new session.")
+                return False
+            self.emit("review-audio", "copy_message", audio_payload)
+            if review_session.awaiting_answer:
+                prompt = (
+                    "Type the German sentence you heard."
+                    if mode == "dictation"
+                    else "Type the English meaning of the German audio."
+                )
+                self.say(prompt)
+                return True
+            heading = "Dictation answer" if mode == "dictation" else "Listening meaning"
+            prompt = f"Your answer: {review_session.submitted_answer or ''}"
+            answer = sentence.german if mode == "dictation" else sentence.english
         else:
             return False
         keyboard = InlineKeyboardMarkup()
@@ -1077,14 +1119,54 @@ class Handlers:
         result, status = await start_session(self.session, self.incoming.actor_id, mode)
         if result is None:
             if status == "no_cards":
-                self.say("No eligible cards are due in this mode.")
+                self.say(
+                    "No eligible cards are due. Dictation and listening need at least one saved entry with generated audio."
+                )
             elif status == "not_approved":
                 self.say("Approved access is required to practice.")
+            elif status == "pending_edit":
+                self.say("Finish or cancel your current edit before starting practice.")
             else:
                 self.say("Use /practice followed by one of the listed modes.")
             return
         review_session, sentence = result
-        self.review_question(review_session, sentence)
+        await self.review_question(review_session, sentence)
+
+    async def review_limits(self, text, user):
+        parts = text.split()
+        if len(parts) == 1:
+            self.say(
+                f"New cards per day: {user.new_cards_per_day}. Session size: {user.review_session_limit}.\n"
+                "Set both with /reviewlimits NEW_PER_DAY SESSION_SIZE (0–100 and 1–100)."
+            )
+            return
+        if (
+            len(parts) != 3
+            or not all(part.isascii() and part.isdigit() for part in parts[1:])
+        ):
+            self.say("Use /reviewlimits NEW_PER_DAY SESSION_SIZE (0–100 and 1–100).")
+            return
+        new_limit, session_limit = map(int, parts[1:])
+        if new_limit > 100 or not 1 <= session_limit <= 100:
+            self.say("New cards per day must be 0–100; session size must be 1–100.")
+            return
+        user.new_cards_per_day = new_limit
+        user.review_session_limit = session_limit
+        self.say(f"Review limits saved: {new_limit} new per day, {session_limit} per session.")
+
+    async def submit_review_answer(self, answer):
+        if not answer.strip():
+            return False
+        if len(answer.strip()) > 1000:
+            self.say("Practice answers are limited to 1,000 characters.")
+            return True
+        from app.services.reviews import submit_typed_answer
+
+        result = await submit_typed_answer(self.session, self.incoming.actor_id, answer)
+        if result is None:
+            return False
+        await self.review_question(*result)
+        return True
 
     async def grade_review_question(self, value):
         from uuid import UUID
@@ -1104,7 +1186,7 @@ class Handlers:
         )
         if status == "graded":
             review_session, sentence = result
-            self.review_question(review_session, sentence)
+            await self.review_question(review_session, sentence)
             return "Grade recorded."
         if status == "complete":
             self.say("Practice complete. Great work!")
