@@ -1,7 +1,7 @@
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 
-SCHEMA_REVISION = "0008_edit_translation_jobs"
+SCHEMA_REVISION = "0009_recording_replacement"
 
 
 class Database:

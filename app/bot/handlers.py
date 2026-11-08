@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from uuid import uuid4
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert
@@ -193,7 +194,7 @@ class Handlers:
 
     async def callback(self, callback):
         if (callback.data or "").startswith(
-            ("library:", "entry:", "archive:", "generate:", "play:", "edit:", "editen:")
+            ("library:", "entry:", "archive:", "generate:", "play:", "edit:", "editen:", "replace:")
         ):
             user = await self.session.get(User, callback.from_user.id)
             approved = callback.from_user.id == self.settings.admin_telegram_id or (
@@ -214,6 +215,8 @@ class Handlers:
                     answer = await self.begin_edit(value)
                 elif command == "editen":
                     answer = await self.begin_edit(value, field="english")
+                elif command == "replace":
+                    answer = await self.begin_recording_replace(value)
                 else:
                     answer = await self.archive_retry(value)
             self.emit(
@@ -305,6 +308,53 @@ class Handlers:
             return
         edit = await self.session.get(InteractionState, message.from_user.id, with_for_update=True)
         if edit:
+            if edit.kind == "recording_replace":
+                voice = message.voice or message.audio
+                if not voice or voice.duration > 120 or (voice.file_size or 0) > 20 * 1024 * 1024:
+                    self.say("Send an audio recording up to two minutes and 20 MiB, or /cancel.")
+                    return
+                from app.db.models import ArchiveJob, AudioAsset, Sentence, StoredMedia
+
+                sentence = await self.session.scalar(
+                    select(Sentence).where(
+                        Sentence.id == edit.sentence_id, Sentence.user_id == message.from_user.id
+                    ).with_for_update()
+                )
+                if sentence is None or sentence.revision != edit.sentence_revision:
+                    await self.session.delete(edit)
+                    self.say("Entry changed while you were replacing its recording. Start again.")
+                    return
+                if not self.settings.telegram_archive_enabled:
+                    self.say("Recording replacement requires archive storage to be enabled.")
+                    return
+                staged = (await self.session.scalars(
+                    select(AudioAsset).where(
+                        AudioAsset.sentence_id == sentence.id,
+                        AudioAsset.kind == "original",
+                        AudioAsset.replacement.is_(True),
+                    ).with_for_update()
+                )).all()
+                for prior in staged:
+                    prior.replacement, prior.active = False, False
+                    prior_job = await self.session.get(ArchiveJob, prior.stored_media_id, with_for_update=True)
+                    if prior_job and prior_job.state in {"pending", "running"}:
+                        prior_job.state, prior_job.error_type = "cancelled", "replacement_superseded"
+                        prior_job.claim_token, prior_job.lease_until = None, None
+                media = StoredMedia(id=uuid4(), telegram_file_id=voice.file_id)
+                self.session.add(media)
+                await self.session.flush()
+                self.session.add(AudioAsset(
+                    id=uuid4(), sentence_id=sentence.id, stored_media_id=media.id,
+                    kind="original", state="archiving", active=False, replacement=True,
+                ))
+                self.session.add(ArchiveJob(
+                    media_id=media.id,
+                    source_chat_id=message.chat.id,
+                    source_message_id=message.message_id,
+                ))
+                await self.session.delete(edit)
+                self.say("Replacement received. Your current recording stays active until the new one is archived.")
+                return
             if not message.text or not message.text.strip() or len(message.text.strip()) > 1000:
                 self.say("Send text up to 1,000 characters, or /cancel.")
                 return
@@ -494,6 +544,27 @@ class Handlers:
                         "Play original recording", callback_data=f"play:{asset.id}"
                     )
                 )
+        if self.settings.telegram_archive_enabled:
+            from app.db.models import AudioAsset
+
+            replacement = await self.session.scalar(
+                select(AudioAsset).where(
+                    AudioAsset.sentence_id == row.id,
+                    AudioAsset.kind == "original",
+                    AudioAsset.replacement.is_(True),
+                )
+            )
+            if replacement:
+                result += f"\n\nReplacement recording: {replacement.state.replace('_', ' ')}."
+                if replacement.state == "archive_failed":
+                    keyboard.add(
+                        InlineKeyboardButton(
+                            "Retry replacement archive", callback_data=f"archive:{row.id}"
+                        )
+                    )
+            keyboard.add(
+                InlineKeyboardButton("Replace original recording", callback_data=f"replace:{row.id}")
+            )
         from app.db.models import AudioJob
         from app.services.audio import generated_audio
 
@@ -558,6 +629,38 @@ class Handlers:
             return "English edit started."
         self.say("Send the new German sentence (up to 1,000 characters). Its English translation will be regenerated. Use /cancel to stop.")
         return "German edit started."
+
+    async def begin_recording_replace(self, value):
+        from uuid import UUID
+
+        from app.db.models import InteractionState
+        from app.services.collections import get_owned_sentence
+
+        if not self.settings.telegram_archive_enabled:
+            return "Recording replacement requires archive storage to be enabled."
+        try:
+            sentence_id = UUID(value)
+        except ValueError:
+            return "Entry unavailable."
+        sentence = await get_owned_sentence(self.session, self.incoming.actor_id, sentence_id)
+        if sentence is None:
+            return "Entry unavailable."
+        state = await self.session.get(InteractionState, self.incoming.actor_id)
+        if state is None:
+            state = InteractionState(
+                user_id=self.incoming.actor_id,
+                kind="recording_replace",
+                sentence_id=sentence.id,
+                sentence_revision=sentence.revision,
+                step="audio",
+            )
+            self.session.add(state)
+        else:
+            state.kind, state.sentence_id, state.sentence_revision, state.step, state.german = (
+                "recording_replace", sentence.id, sentence.revision, "audio", None
+            )
+        self.say("Send the replacement voice or audio recording (up to two minutes and 20 MiB). Use /cancel to stop.")
+        return "Send replacement recording."
 
     async def generate_audio(self, value):
         from uuid import UUID

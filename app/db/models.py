@@ -43,6 +43,10 @@ class Sentence(Base):
 
 class InteractionState(Base):
     __tablename__ = "interaction_states"
+    __table_args__ = (
+        CheckConstraint("kind IN ('sentence_edit','recording_replace')", name="interaction_kind"),
+        CheckConstraint("step IN ('german','english','audio')", name="interaction_step"),
+    )
     user_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )
@@ -120,6 +124,7 @@ class AudioAsset(Base):
     kind: Mapped[str] = mapped_column(String(16))
     state: Mapped[str] = mapped_column(String(16), server_default="ready")
     active: Mapped[bool] = mapped_column(Boolean, server_default="true")
+    replacement: Mapped[bool] = mapped_column(Boolean, server_default="false")
 
 
 class ArchiveJob(Base):

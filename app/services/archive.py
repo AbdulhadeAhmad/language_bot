@@ -51,10 +51,11 @@ async def retry_archive(session, user_id, sentence_id):
             Sentence.id == sentence_id,
             Sentence.user_id == user_id,
             AudioAsset.kind == "original",
-            AudioAsset.active,
+            (AudioAsset.active.is_(True) | AudioAsset.replacement.is_(True)),
             ArchiveJob.state == "failed",
         )
-        .with_for_update(of=ArchiveJob)
+        .order_by(AudioAsset.replacement.desc())
+        .with_for_update(of=(ArchiveJob, AudioAsset))
     )
     if job is None:
         return False
@@ -62,7 +63,8 @@ async def retry_archive(session, user_id, sentence_id):
     job.claim_token, job.lease_until, job.available_at = None, None, func.now()
     await session.execute(
         update(AudioAsset)
-        .where(AudioAsset.stored_media_id == job.media_id, AudioAsset.active)
+        .where(AudioAsset.stored_media_id == job.media_id)
+        .where(AudioAsset.active.is_(True) | AudioAsset.replacement.is_(True))
         .values(state="archiving")
     )
     return True
@@ -141,11 +143,25 @@ class ArchiveRunner:
             if state == "done":
                 media = await session.get(StoredMedia, job.media_id)
                 media.archive_chat_id, media.archive_message_id = job.target_chat_id, message_id
-            await session.execute(
-                update(AudioAsset)
-                .where(AudioAsset.stored_media_id == job.media_id, AudioAsset.active)
-                .values(state={"done": "ready", "failed": "archive_failed"}.get(state, "archiving"))
-            )
+            assets = (await session.scalars(
+                select(AudioAsset).where(AudioAsset.stored_media_id == job.media_id).with_for_update()
+            )).all()
+            if state == "done":
+                for asset in assets:
+                    if asset.kind == "original" and asset.replacement:
+                        await session.execute(
+                            update(AudioAsset)
+                            .where(
+                                AudioAsset.sentence_id == asset.sentence_id,
+                                AudioAsset.kind == "original",
+                                AudioAsset.active.is_(True),
+                            )
+                            .values(active=False)
+                        )
+                        asset.active, asset.replacement = True, False
+            for asset in assets:
+                if asset.active or asset.replacement:
+                    asset.state = {"done": "ready", "failed": "archive_failed"}.get(state, "archiving")
             return True
 
     async def heartbeat(self, job):

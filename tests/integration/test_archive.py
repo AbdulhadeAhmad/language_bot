@@ -201,3 +201,57 @@ async def test_expired_final_attempt_never_sends_a_fourth_copy(db, config):
     async with db.sessions() as session:
         row = await session.get(ArchiveJob, job.media_id)
         assert row.state == "failed" and row.uncertain
+
+
+async def test_replacement_preserves_current_recording_until_archive_succeeds(db, config):
+    _, sentence = await setup_archive(db, config)
+    transport = RecordingTransport()
+    runner = ArchiveRunner(db, config, transport)
+    assert await runner.process_one()
+    old_asset_id = await get_active_original(db, sentence.id)
+
+    def callback(data):
+        return {
+            "update_id": 77,
+            "callback_query": {
+                "id": "replace",
+                "chat_instance": "test",
+                "data": data,
+                "from": {"id": 11, "is_bot": False, "first_name": "Test"},
+                "message": payload(user=11)["message"],
+            },
+        }
+
+    await dispatch(db, config, transport, callback(f"replace:{sentence.id}"))
+    replacement_voice = {**VOICE, "file_id": "replacement-recording", "file_unique_id": "replacement"}
+    await dispatch(db, config, transport, payload(2, voice=replacement_voice))
+    async with db.sessions() as session:
+        old_asset = await session.get(AudioAsset, old_asset_id)
+        staged = await session.scalar(select(AudioAsset).where(AudioAsset.replacement.is_(True)))
+        assert old_asset.active and old_asset.state == "ready"
+        assert staged and not staged.active and staged.state == "archiving"
+        staged_media = await session.get(StoredMedia, staged.stored_media_id)
+        assert staged_media.telegram_file_id == "replacement-recording"
+
+    transport.error = RejectedDelivery("temporary source unavailable")
+    assert await runner.process_one()
+    async with db.sessions.begin() as session:
+        assert (await session.get(AudioAsset, old_asset_id)).active
+        staged = await session.scalar(select(AudioAsset).where(AudioAsset.replacement.is_(True)))
+        assert staged.state == "archive_failed"
+        assert await retry_archive(session, 11, sentence.id)
+
+    transport.error = None
+    assert await runner.process_one()
+    async with db.sessions() as session:
+        old_asset = await session.get(AudioAsset, old_asset_id)
+        replacement = await session.scalar(select(AudioAsset).where(AudioAsset.sentence_id == sentence.id, AudioAsset.active.is_(True)))
+        assert not old_asset.active
+        assert replacement and replacement.kind == "original" and replacement.state == "ready"
+        assert not replacement.replacement
+        assert await session.scalar(select(func.count()).select_from(AudioAsset).where(AudioAsset.sentence_id == sentence.id, AudioAsset.active.is_(True))) == 1
+
+
+async def get_active_original(db, sentence_id):
+    async with db.sessions() as session:
+        return await session.scalar(select(AudioAsset.id).where(AudioAsset.sentence_id == sentence_id, AudioAsset.kind == "original", AudioAsset.active.is_(True)))
