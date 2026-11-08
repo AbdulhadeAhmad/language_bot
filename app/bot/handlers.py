@@ -43,10 +43,12 @@ class Handlers:
             }
         )
 
-    def say(self, text, key="reply", user_id=None, keyboard=None, audience="status"):
+    def say(self, text, key="reply", user_id=None, keyboard=None, audience="status", parse_mode=None):
         payload = {"chat_id": user_id or self.incoming.actor_id, "text": text}
         if keyboard:
             payload["reply_markup"] = keyboard.to_dict()
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
         self.emit(key, "send_message", payload, audience, user_id)
 
     def buttons(self, user):
@@ -194,7 +196,7 @@ class Handlers:
 
     async def callback(self, callback):
         if (callback.data or "").startswith(
-            ("library:", "entry:", "archive:", "generate:", "generateall:", "regenerate:", "play:", "edit:", "editen:", "replace:", "deleteaudio:", "deleteentry:", "confirmdelete:", "canceldelete:", "privacy:", "discover:", "latest:", "search:", "random:", "publicentry:", "copy:", "playpublic:")
+            ("library:", "entry:", "archive:", "generate:", "generateall:", "regenerate:", "play:", "edit:", "editen:", "replace:", "deleteaudio:", "deleteentry:", "confirmdelete:", "canceldelete:", "privacy:", "discover:", "latest:", "search:", "random:", "publicentry:", "copy:", "playpublic:", "grade:")
         ):
             user = await self.session.get(User, callback.from_user.id)
             approved = callback.from_user.id == self.settings.admin_telegram_id or (
@@ -251,6 +253,8 @@ class Handlers:
                     answer = await self.public_entry(value)
                 elif command == "copy":
                     answer = await self.copy_public_entry(value)
+                elif command == "grade":
+                    answer = await self.grade_review_question(value)
                 else:
                     answer = await self.archive_retry(value)
             self.emit(
@@ -348,6 +352,15 @@ class Handlers:
             return
         if command and command[0] == "/search":
             await self.search_public_entries(text.partition(" ")[2])
+            return
+        if command and command[0] == "/practice":
+            if len(command) != 2:
+                self.say(
+                    "Choose a mode: /practice de_to_en, /practice en_to_de, "
+                    "/practice dictation, or /practice listening."
+                )
+                return
+            await self.start_practice(command[1])
             return
         if text.strip() == "/cancel":
             await self.session.execute(
@@ -1033,6 +1046,70 @@ class Handlers:
             keyboard=keyboard,
         )
         return "Copied to your collection."
+
+    def review_question(self, review_session, sentence):
+        from html import escape
+
+        mode = review_session.mode
+        if mode == "de_to_en":
+            heading, prompt, answer = "German → English", sentence.german, sentence.english
+        elif mode == "en_to_de":
+            heading, prompt, answer = "English → German", sentence.english, sentence.german
+        else:
+            return False
+        keyboard = InlineKeyboardMarkup()
+        for label, rating in (("Again", 1), ("Hard", 2), ("Good", 3), ("Easy", 4)):
+            keyboard.add(InlineKeyboardButton(
+                label,
+                callback_data=f"grade:{review_session.id.hex}:{review_session.question_number}:{rating}",
+            ))
+        self.say(
+            f"<b>{heading}</b>\n{escape(prompt)}"
+            f"\n\n<span class=\"tg-spoiler\">{escape(answer)}</span>",
+            keyboard=keyboard,
+            parse_mode="HTML",
+        )
+        return True
+
+    async def start_practice(self, mode):
+        from app.services.reviews import start_session
+
+        result, status = await start_session(self.session, self.incoming.actor_id, mode)
+        if result is None:
+            if status == "no_cards":
+                self.say("No eligible cards are due in this mode.")
+            elif status == "not_approved":
+                self.say("Approved access is required to practice.")
+            else:
+                self.say("Use /practice followed by one of the listed modes.")
+            return
+        review_session, sentence = result
+        self.review_question(review_session, sentence)
+
+    async def grade_review_question(self, value):
+        from uuid import UUID
+
+        from app.services.reviews import grade_question
+
+        parts = value.split(":")
+        if len(parts) != 3 or not parts[0].isalnum() or not parts[1].isdigit() or not parts[2].isdigit():
+            return "Invalid review action."
+        try:
+            session_id = UUID(hex=parts[0])
+            question_number, rating = int(parts[1]), int(parts[2])
+        except ValueError:
+            return "Invalid review action."
+        result, status = await grade_question(
+            self.session, self.incoming.actor_id, session_id, question_number, rating
+        )
+        if status == "graded":
+            review_session, sentence = result
+            self.review_question(review_session, sentence)
+            return "Grade recorded."
+        if status == "complete":
+            self.say("Practice complete. Great work!")
+            return "Practice complete."
+        return "This review question has expired."
 
     def status_effect(self, operation):
         self.say(
