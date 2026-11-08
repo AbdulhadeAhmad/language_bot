@@ -1,11 +1,11 @@
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from telebot.async_telebot import AsyncTeleBot
 from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-from app.db.models import AccessChange, User
+from app.db.models import AccessChange, InteractionState, User
 
 
 class PropagateErrors:
@@ -193,7 +193,7 @@ class Handlers:
 
     async def callback(self, callback):
         if (callback.data or "").startswith(
-            ("library:", "entry:", "archive:", "generate:", "play:")
+            ("library:", "entry:", "archive:", "generate:", "play:", "edit:")
         ):
             user = await self.session.get(User, callback.from_user.id)
             approved = callback.from_user.id == self.settings.admin_telegram_id or (
@@ -210,6 +210,8 @@ class Handlers:
                     answer = await self.generate_audio(value)
                 elif command == "play":
                     answer = await self.play_audio(value)
+                elif command == "edit":
+                    answer = await self.begin_edit(value)
                 else:
                     answer = await self.archive_retry(value)
             self.emit(
@@ -292,6 +294,55 @@ class Handlers:
         command = text.split(maxsplit=1)
         if command and command[0] == "/library":
             await self.library(command[1] if len(command) == 2 else "0")
+            return
+        if text.strip() == "/cancel":
+            await self.session.execute(
+                delete(InteractionState).where(InteractionState.user_id == message.from_user.id)
+            )
+            self.say("Edit cancelled. Your saved entry is unchanged.")
+            return
+        edit = await self.session.get(InteractionState, message.from_user.id, with_for_update=True)
+        if edit:
+            if not message.text or not message.text.strip() or len(message.text.strip()) > 1000:
+                self.say("Send text up to 1,000 characters, or /cancel.")
+                return
+            value = message.text.strip()
+            if edit.step == "german":
+                edit.german, edit.step = value, "english"
+                self.say("Now send the English translation, or /cancel.")
+            else:
+                from app.db.models import AudioAsset, AudioJob, Sentence
+                from app.services.collections import has_duplicate, normalize_german
+
+                sentence = await self.session.scalar(
+                    select(Sentence).where(
+                        Sentence.id == edit.sentence_id, Sentence.user_id == message.from_user.id
+                    ).with_for_update()
+                )
+                if sentence is None:
+                    await self.session.delete(edit)
+                    self.say("Entry unavailable. The edit was cancelled.")
+                    return
+                sentence.german = edit.german
+                sentence.normalized_german = normalize_german(edit.german)
+                sentence.english = value
+                sentence.revision += 1
+                sentence.duplicate_warning = await has_duplicate(
+                    self.session, message.from_user.id, edit.german, exclude_id=sentence.id
+                )
+                assets = (await self.session.scalars(
+                    select(AudioAsset).where(AudioAsset.sentence_id == sentence.id,
+                                             AudioAsset.kind == "generated", AudioAsset.active)
+                )).all()
+                for asset in assets:
+                    asset.active = False
+                    job = await self.session.get(AudioJob, asset.id, with_for_update=True)
+                    if job and job.state in {"pending", "running"}:
+                        job.state, job.error_type = "cancelled", "sentence_edited"
+                        job.claim_token, job.lease_until = None, None
+                await self.session.delete(edit)
+                self.say("Entry updated. German audio can be generated again from the saved entry.")
+                await self.entry(str(sentence.id))
             return
         if command and command[0] == "/entry":
             await self.entry(command[1] if len(command) == 2 else "")
@@ -414,6 +465,8 @@ class Handlers:
             self.say("Entry unavailable.")
             return "Entry unavailable."
         result = f"German:\n{row.german}\n\nEnglish:\n{row.english}"
+        if row.duplicate_warning:
+            result += "\n\nSimilar German text exists in your collection or a public collection."
         from app.services.archive import original_recording
 
         original = await original_recording(self.session, self.incoming.actor_id, row.id)
@@ -456,6 +509,7 @@ class Handlers:
                 label = "Retry German audio" if generated else "Generate German audio"
                 keyboard.add(InlineKeyboardButton(label, callback_data=f"generate:{row.id}"))
         keyboard.add(InlineKeyboardButton("Refresh entry", callback_data=f"entry:{row.id}"))
+        keyboard.add(InlineKeyboardButton("Edit text", callback_data=f"edit:{row.id}"))
         for index in range(0, len(result), 4000):
             self.say(
                 result[index : index + 4000],
@@ -463,6 +517,35 @@ class Handlers:
                 keyboard=keyboard if index == 0 else None,
             )
         return "Entry opened."
+
+    async def begin_edit(self, value):
+        from uuid import UUID
+
+        from app.db.models import InteractionState
+        from app.services.collections import get_owned_sentence
+
+        try:
+            sentence_id = UUID(value)
+        except ValueError:
+            return "Entry unavailable."
+        sentence = await get_owned_sentence(self.session, self.incoming.actor_id, sentence_id)
+        if sentence is None:
+            return "Entry unavailable."
+        state = await self.session.get(InteractionState, self.incoming.actor_id)
+        if state is None:
+            state = InteractionState(
+                user_id=self.incoming.actor_id,
+                kind="sentence_edit",
+                sentence_id=sentence.id,
+                step="german",
+            )
+            self.session.add(state)
+        else:
+            state.kind, state.sentence_id, state.step, state.german = (
+                "sentence_edit", sentence.id, "german", None
+            )
+        self.say("Send the new German sentence (up to 1,000 characters). Then send its English translation. Use /cancel to stop.")
+        return "Text edit started."
 
     async def generate_audio(self, value):
         from uuid import UUID

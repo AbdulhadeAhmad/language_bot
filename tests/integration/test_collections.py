@@ -4,7 +4,15 @@ from uuid import uuid4
 
 from sqlalchemy import func, select, update
 
-from app.db.models import AudioAsset, Operation, Sentence, StoredMedia, User
+from app.db.models import (
+    AudioAsset,
+    AudioJob,
+    InteractionState,
+    Operation,
+    Sentence,
+    StoredMedia,
+    User,
+)
 from app.services.collections import (
     DUPLICATE_WARNING,
     get_owned_sentence,
@@ -162,3 +170,44 @@ async def test_library_pagination_entry_callbacks_and_access_checks(db, config):
     assert "Send /start" in transport.sent[-1][1]["text"]
     await dispatch(db, config, transport, payload(5, text="/library -1"))
     assert "Use /library" in transport.sent[-1][1]["text"]
+
+
+async def test_text_edit_is_persisted_cancelable_and_revision_fenced(db, config):
+    sentence_id, asset_id = uuid4(), uuid4()
+    async with db.sessions.begin() as session:
+        session.add_all([User(id=11, status="approved"), User(id=22, status="approved")])
+        await session.flush()
+        session.add_all([
+            Sentence(id=sentence_id, user_id=11, german="Guten Morgen", english="Good morning", normalized_german="Guten Morgen"),
+        ])
+        await session.flush()
+        session.add(AudioAsset(id=asset_id, sentence_id=sentence_id, kind="generated", voice_id="de_DE-thorsten-medium", state="generating"))
+        session.add(AudioJob(asset_id=asset_id, sentence_revision=1))
+
+    def callback(data, user=11):
+        return {
+            "update_id": 101,
+            "callback_query": {
+                "id": "edit-callback", "chat_instance": "test",
+                "from": {"id": user, "is_bot": False, "first_name": "Test"},
+                "data": data, "message": payload(user=user)["message"],
+            },
+        }
+
+    transport = RecordingTransport()
+    await dispatch(db, config, transport, callback(f"edit:{sentence_id}", user=22))
+    assert transport.sent[-1][1]["text"] == "Entry unavailable."
+    await dispatch(db, config, transport, callback(f"edit:{sentence_id}"))
+    await dispatch(db, config, transport, payload(2, text="Guten Tag!"))
+    async with db.sessions() as session:
+        state = await session.get(InteractionState, 11)
+        assert state and state.step == "english" and state.german == "Guten Tag!"
+        assert (await session.get(Sentence, sentence_id)).german == "Guten Morgen"
+    await dispatch(db, config, transport, payload(3, text="Good day!"))
+    async with db.sessions() as session:
+        sentence = await session.get(Sentence, sentence_id)
+        asset, job = await session.get(AudioAsset, asset_id), await session.get(AudioJob, asset_id)
+        assert sentence.german == "Guten Tag!" and sentence.english == "Good day!"
+        assert sentence.revision == 2 and not sentence.duplicate_warning
+        assert asset.active is False and job.state == "cancelled"
+        assert await session.get(InteractionState, 11) is None

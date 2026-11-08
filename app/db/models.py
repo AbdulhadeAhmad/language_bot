@@ -41,6 +41,20 @@ class Sentence(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class InteractionState(Base):
+    __tablename__ = "interaction_states"
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    kind: Mapped[str] = mapped_column(String(32))
+    sentence_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("sentences.id", ondelete="CASCADE")
+    )
+    step: Mapped[str] = mapped_column(String(16))
+    german: Mapped[str | None] = mapped_column(String)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Voice(Base):
     __tablename__ = "voices"
     id: Mapped[str] = mapped_column(String(100), primary_key=True)
