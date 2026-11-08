@@ -194,7 +194,7 @@ class Handlers:
 
     async def callback(self, callback):
         if (callback.data or "").startswith(
-            ("library:", "entry:", "archive:", "generate:", "play:", "edit:", "editen:", "replace:")
+            ("library:", "entry:", "archive:", "generate:", "generateall:", "play:", "edit:", "editen:", "replace:")
         ):
             user = await self.session.get(User, callback.from_user.id)
             approved = callback.from_user.id == self.settings.admin_telegram_id or (
@@ -209,6 +209,8 @@ class Handlers:
                     answer = await self.entry(value)
                 elif command == "generate":
                     answer = await self.generate_audio(value)
+                elif command == "generateall":
+                    answer = await self.generate_all_audio(value)
                 elif command == "play":
                     answer = await self.play_audio(value)
                 elif command == "edit":
@@ -565,27 +567,32 @@ class Handlers:
             keyboard.add(
                 InlineKeyboardButton("Replace original recording", callback_data=f"replace:{row.id}")
             )
-        from app.db.models import AudioJob
+        from app.db.models import Voice
         from app.services.audio import generated_audio
 
-        generated = await generated_audio(self.session, self.incoming.actor_id, row.id)
-        if generated and generated.state == "ready":
-            keyboard.add(
-                InlineKeyboardButton("Play German audio", callback_data=f"play:{generated.id}")
+        voices = (await self.session.scalars(select(Voice).order_by(Voice.id))).all()
+        for voice in voices:
+            generated = await generated_audio(
+                self.session, self.incoming.actor_id, row.id, voice.id
             )
-        elif self.settings.telegram_tts_enabled:
-            if generated:
-                job = await self.session.get(AudioJob, generated.id)
-                if generated.state == "failed":
-                    step = "generate" if job and job.step == "synthesize" else "save"
-                    result += (
-                        f"\n\nCould not {step} German audio. Your text and translation are saved."
-                    )
-                else:
-                    result += f"\n\nGerman audio: {generated.state}."
-            if not generated or generated.state == "failed":
-                label = "Retry German audio" if generated else "Generate German audio"
-                keyboard.add(InlineKeyboardButton(label, callback_data=f"generate:{row.id}"))
+            voice_name = voice.id.split("-", 1)[-1].replace("-", " ").replace("_", " ").title()
+            if generated and generated.state == "ready":
+                keyboard.add(InlineKeyboardButton(
+                    f"Play {voice_name}", callback_data=f"play:{generated.id}"
+                ))
+            elif self.settings.telegram_tts_enabled:
+                if generated and generated.state == "failed":
+                    result += f"\n\nCould not generate {voice_name} audio. Your text and translation are saved."
+                elif generated:
+                    result += f"\n\n{voice_name} audio: {generated.state}."
+                label = f"Retry {voice_name}" if generated else f"Generate {voice_name}"
+                keyboard.add(InlineKeyboardButton(
+                    label, callback_data=f"generate:{row.id}:{voice.id}"
+                ))
+        if self.settings.telegram_tts_enabled and voices:
+            keyboard.add(InlineKeyboardButton(
+                "Generate missing voices", callback_data=f"generateall:{row.id}"
+            ))
         keyboard.add(InlineKeyboardButton("Refresh entry", callback_data=f"entry:{row.id}"))
         keyboard.add(InlineKeyboardButton("Edit German", callback_data=f"edit:{row.id}"))
         keyboard.add(InlineKeyboardButton("Edit English", callback_data=f"editen:{row.id}"))
@@ -669,18 +676,45 @@ class Handlers:
 
         if not self.settings.telegram_tts_enabled:
             return "German audio generation is not enabled yet."
+        parts = value.split(":", 1)
         try:
-            sentence_id = UUID(value)
+            sentence_id = UUID(parts[0])
         except ValueError:
             return "Entry unavailable."
+        voice_id = parts[1] if len(parts) == 2 else None
         asset = await request_audio(
-            self.session, self.settings, self.incoming.actor_id, sentence_id
+            self.session, self.settings, self.incoming.actor_id, sentence_id, voice_id
         )
         if asset is None:
             return "Entry unavailable."
         if asset.state == "ready":
             return "German audio is ready. Open the saved entry to play it."
         return "German audio queued. Refresh the entry to check progress."
+
+    async def generate_all_audio(self, value):
+        from uuid import UUID
+
+        from app.db.models import Voice
+        from app.services.audio import generated_audio, request_audio
+
+        if not self.settings.telegram_tts_enabled:
+            return "German audio generation is not enabled yet."
+        try:
+            sentence_id = UUID(value)
+        except ValueError:
+            return "Entry unavailable."
+        voices = (await self.session.scalars(select(Voice).order_by(Voice.id))).all()
+        queued = 0
+        for voice in voices:
+            existing = await generated_audio(
+                self.session, self.incoming.actor_id, sentence_id, voice.id
+            )
+            if existing is None or existing.state != "ready":
+                asset = await request_audio(
+                    self.session, self.settings, self.incoming.actor_id, sentence_id, voice.id
+                )
+                queued += bool(asset and asset.state != "ready")
+        return f"Queued {queued} missing voice(s). Refresh the entry to check progress."
 
     async def play_audio(self, value):
         from uuid import UUID

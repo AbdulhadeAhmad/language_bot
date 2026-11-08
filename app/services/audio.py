@@ -65,7 +65,7 @@ def archive_audio_metadata(sentence, asset, voice):
     }
 
 
-async def generated_audio(session, user_id, sentence_id):
+async def generated_audio(session, user_id, sentence_id, voice_id=DEFAULT_VOICE):
     return await session.scalar(
         select(AudioAsset)
         .join(Sentence)
@@ -73,13 +73,13 @@ async def generated_audio(session, user_id, sentence_id):
             Sentence.user_id == user_id,
             Sentence.id == sentence_id,
             AudioAsset.kind == "generated",
-            AudioAsset.voice_id == DEFAULT_VOICE,
+            AudioAsset.voice_id == voice_id,
             AudioAsset.active,
         )
     )
 
 
-async def request_audio(session, settings, user_id, sentence_id):
+async def request_audio(session, settings, user_id, sentence_id, voice_id=DEFAULT_VOICE):
     if not settings.telegram_tts_enabled:
         return None
     sentence = await session.scalar(
@@ -92,7 +92,10 @@ async def request_audio(session, settings, user_id, sentence_id):
     )
     if sentence is None:
         return None
-    asset = await generated_audio(session, user_id, sentence.id)
+    voice_id = voice_id or DEFAULT_VOICE
+    if await session.get(Voice, voice_id) is None:
+        return None
+    asset = await generated_audio(session, user_id, sentence.id, voice_id)
     job = await session.get(AudioJob, asset.id) if asset else None
     if job and job.sentence_revision != sentence.revision:
         asset.active = False
@@ -102,7 +105,7 @@ async def request_audio(session, settings, user_id, sentence_id):
         asset = AudioAsset(
             id=uuid4(),
             sentence_id=sentence.id,
-            voice_id=DEFAULT_VOICE,
+            voice_id=voice_id,
             kind="generated",
             state="generating",
         )

@@ -114,6 +114,25 @@ async def test_generation_is_opt_in_and_duplicate_requests_share_one_asset(db, c
     assert not await AudioRunner(db, config, transport, models).process_one()
 
 
+async def test_generate_missing_voices_is_idempotent_for_configured_voices(db, config):
+    sentence = await setup_speech(db, config)
+    transport = SpeechTransport()
+    await dispatch(db, config, transport, callback(11, f"generateall:{sentence.id}"))
+    async with db.sessions() as session:
+        assets = (await session.scalars(select(AudioAsset).where(
+            AudioAsset.sentence_id == sentence.id,
+            AudioAsset.kind == "generated",
+            AudioAsset.active.is_(True),
+        ))).all()
+        jobs = (await session.scalars(select(AudioJob).where(AudioJob.asset_id.in_([a.id for a in assets])))).all()
+        assert len(assets) == len(jobs) == 1 and jobs[0].state == "pending"
+    await dispatch(db, config, transport, callback(11, f"generateall:{sentence.id}"))
+    async with db.sessions() as session:
+        assert await session.scalar(select(func.count()).select_from(AudioAsset).where(
+            AudioAsset.sentence_id == sentence.id,
+            AudioAsset.kind == "generated",
+            AudioAsset.active.is_(True),
+        )) == 1
 async def test_audio_callbacks_check_approval_ownership_and_reuse_archive(db, config):
     sentence = await setup_speech(db, config)
     async with db.sessions.begin() as session:
@@ -127,7 +146,7 @@ async def test_audio_callbacks_check_approval_ownership_and_reuse_archive(db, co
     await runner.process_one()
     await dispatch(db, config, transport, payload(2, text=f"/entry {sentence.id}"))
     keyboard = transport.sent[-1][1]["reply_markup"]["inline_keyboard"]
-    button = next(row[0] for row in keyboard if row[0]["text"] == "Play German audio")
+    button = next(row[0] for row in keyboard if row[0]["text"] == "Play Thorsten Medium")
     for user in [22, 33]:
         before = len(transport.sent)
         await dispatch(db, config, transport, callback(user, button["callback_data"]))
@@ -173,7 +192,7 @@ async def test_failed_synthesis_manual_retry_uses_new_model_identity(db, config)
     runner = AudioRunner(db, config, transport, models)
     await runner.process_one()
     await dispatch(db, config, transport, payload(2, text=f"/entry {sentence.id}"))
-    assert "Could not generate German audio" in transport.sent[-1][1]["text"]
+    assert "Could not generate Thorsten Medium audio" in transport.sent[-1][1]["text"]
     await request(db, config, sentence)
     models.synthesis_error = None
     await runner.process_one()
