@@ -190,3 +190,48 @@ async def test_repeated_copies_keep_immediate_provenance_and_shared_audio(db):
             )
         )).all()
         assert len(generated) == 2
+
+
+async def test_latest_and_random_only_show_public_entries(db, config):
+    public_user, private_user = 510, 520
+    async with db.sessions.begin() as session:
+        session.add_all([
+            User(id=public_user, status="approved", private=False),
+            User(id=private_user, status="approved", private=True),
+        ])
+        await session.flush()
+        session.add_all([
+            Sentence(
+                id=uuid4(), user_id=public_user,
+                german=f"Öffentlich {index}", english=f"Public {index}",
+                normalized_german=f"Öffentlich {index}",
+            )
+            for index in range(6)
+        ] + [Sentence(
+            id=uuid4(), user_id=private_user, german="Geheim.", english="Secret.",
+            normalized_german="Geheim.",
+        )])
+
+    transport = RecordingTransport()
+    await dispatch(db, config, transport, payload(user=public_user, text="/latest"))
+    first_page = transport.sent[-1][1]
+    buttons = first_page["reply_markup"]["inline_keyboard"]
+    assert len(buttons) == 6
+    assert buttons[-1] == [{"text": "Next", "callback_data": "latest:1"}]
+    assert "Geheim" not in first_page["text"]
+
+    await dispatch(
+        db, config, transport,
+        callback(public_user, "latest:1", "Latest public entries · Page 1"),
+    )
+    second_page = transport.sent[-2][1]
+    assert len(second_page["reply_markup"]["inline_keyboard"]) == 2
+    assert second_page["reply_markup"]["inline_keyboard"][-1] == [
+        {"text": "Previous", "callback_data": "latest:0"}
+    ]
+
+    await dispatch(db, config, transport, payload(user=public_user, text="/random"))
+    random_detail = transport.sent[-1][1]
+    assert "Geheim." not in random_detail["text"]
+    assert "Secret." not in random_detail["text"]
+    assert random_detail["text"].startswith("German:\nÖffentlich ")
