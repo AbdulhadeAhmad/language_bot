@@ -194,7 +194,7 @@ class Handlers:
 
     async def callback(self, callback):
         if (callback.data or "").startswith(
-            ("library:", "entry:", "archive:", "generate:", "generateall:", "regenerate:", "play:", "edit:", "editen:", "replace:", "deleteaudio:", "deleteentry:", "confirmdelete:", "canceldelete:", "privacy:", "discover:", "latest:", "random:", "publicentry:", "copy:", "playpublic:")
+            ("library:", "entry:", "archive:", "generate:", "generateall:", "regenerate:", "play:", "edit:", "editen:", "replace:", "deleteaudio:", "deleteentry:", "confirmdelete:", "canceldelete:", "privacy:", "discover:", "latest:", "search:", "random:", "publicentry:", "copy:", "playpublic:")
         ):
             user = await self.session.get(User, callback.from_user.id)
             approved = callback.from_user.id == self.settings.admin_telegram_id or (
@@ -237,6 +237,14 @@ class Handlers:
                     answer = await self.discover_menu()
                 elif command == "latest":
                     answer = await self.latest_public_entries(value)
+                elif command == "search":
+                    message_text = callback.message.text or ""
+                    query = (
+                        message_text.partition(": ")[2].splitlines()[0]
+                        if message_text.startswith("Public search: ")
+                        else ""
+                    )
+                    answer = await self.search_public_entries(query, value)
                 elif command == "random":
                     answer = await self.random_public_entry()
                 elif command == "publicentry":
@@ -917,7 +925,7 @@ class Handlers:
         self.say("Search public entries with /search WORDS.", keyboard=keyboard)
         return "Discovery opened."
 
-    def public_results(self, rows, title, page=None):
+    def public_results(self, rows, title, page=None, page_command="latest"):
         if not rows:
             self.say(f"{title}\nNo public entries found.")
             return
@@ -927,9 +935,9 @@ class Handlers:
             keyboard.add(InlineKeyboardButton(label, callback_data=f"publicentry:{row.id}"))
         if page is not None:
             if page:
-                keyboard.add(InlineKeyboardButton("Previous", callback_data=f"latest:{page - 1}"))
+                keyboard.add(InlineKeyboardButton("Previous", callback_data=f"{page_command}:{page - 1}"))
             if len(rows) > 5:
-                keyboard.add(InlineKeyboardButton("Next", callback_data=f"latest:{page + 1}"))
+                keyboard.add(InlineKeyboardButton("Next", callback_data=f"{page_command}:{page + 1}"))
         self.say(title, keyboard=keyboard)
 
     async def latest_public_entries(self, value="0"):
@@ -942,14 +950,17 @@ class Handlers:
         self.public_results(rows, f"Latest public entries · Page {page + 1}", page)
         return "Latest public entries opened."
 
-    async def search_public_entries(self, query):
+    async def search_public_entries(self, query, value="0"):
         from app.services.discovery import search_public
 
         if not query.strip() or len(query.strip()) > 100:
             self.say("Use /search WORDS (up to 100 characters).")
             return "Search query required."
-        rows = await search_public(self.session, query)
-        self.public_results(rows, f"Public search: {query.strip()}")
+        if not value.isascii() or not value.isdigit() or len(value) > 6 or int(value) > 100000:
+            return "Invalid search page."
+        page = int(value)
+        rows = await search_public(self.session, query, page)
+        self.public_results(rows, f"Public search: {query.strip()}", page, "search")
         return "Public search complete."
 
     async def random_public_entry(self):

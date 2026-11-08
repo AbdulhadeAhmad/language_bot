@@ -9,7 +9,7 @@ from app.services.discovery import search_public
 from .test_foundation import RecordingTransport, dispatch, payload
 
 
-def callback(user, data):
+def callback(user, data, message_text=""):
     return {
         "update_id": 220,
         "callback_query": {
@@ -17,7 +17,7 @@ def callback(user, data):
             "chat_instance": "test",
             "data": data,
             "from": {"id": user, "is_bot": False, "first_name": "Test"},
-            "message": payload(user=user)["message"],
+            "message": {**payload(user=user)["message"], "date": 1, "text": message_text},
         },
     }
 
@@ -86,3 +86,47 @@ async def test_discovery_privacy_rechecks_and_copies_are_independent(db, config)
 
     await dispatch(db, config, transport, callback(22, f"publicentry:{source_id}"))
     assert transport.sent[-1][1]["text"] == "Entry unavailable."
+
+
+async def test_public_search_paginates_and_rechecks_visibility(db, config):
+    user_id = 310
+    async with db.sessions.begin() as session:
+        session.add(User(id=user_id, status="approved", private=False))
+        await session.flush()
+        session.add_all([
+            Sentence(
+                id=uuid4(),
+                user_id=user_id,
+                german=f"Hallo Welt {index}",
+                english=f"Hello world {index}",
+                normalized_german=f"Hallo Welt {index}",
+            )
+            for index in range(7)
+        ])
+
+    transport = RecordingTransport()
+    await dispatch(db, config, transport, payload(user=user_id, text="/search Hallo"))
+    first_page = transport.sent[-1][1]
+    controls = first_page["reply_markup"]["inline_keyboard"][-1]
+    assert controls == [{"text": "Next", "callback_data": "search:1"}]
+
+    await dispatch(
+        db, config, transport,
+        callback(user_id, "search:1", "Public search: Hallo"),
+    )
+    second_page = transport.sent[-2][1]
+    controls = second_page["reply_markup"]["inline_keyboard"][-1]
+    assert [button["callback_data"] for button in controls] == ["search:0"]
+    assert len(second_page["reply_markup"]["inline_keyboard"]) == 3
+
+    await dispatch(
+        db, config, transport,
+        payload(user=user_id, text="/privacy"),
+    )
+    privacy_controls = transport.sent[-1][1]["reply_markup"]["inline_keyboard"]
+    await dispatch(db, config, transport, callback(user_id, privacy_controls[0][0]["callback_data"]))
+    await dispatch(
+        db, config, transport,
+        callback(user_id, "search:1", "Public search: Hallo"),
+    )
+    assert transport.sent[-2][1]["text"].endswith("No public entries found.")

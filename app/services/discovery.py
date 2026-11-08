@@ -22,7 +22,7 @@ async def public_sentence(session, sentence_id):
     )
 
 
-async def search_public(session, query, limit=5):
+async def search_public(session, query, page=0, page_size=5):
     term = query.strip()
     if not term or len(term) > 100:
         return []
@@ -32,7 +32,8 @@ async def search_public(session, query, limit=5):
         _public_sentence_query()
         .where(or_(Sentence.german.ilike(pattern, escape="\\"), Sentence.english.ilike(pattern, escape="\\")))
         .order_by(Sentence.created_at.desc(), Sentence.id.desc())
-        .limit(limit)
+        .offset(page * page_size)
+        .limit(page_size + 1)
     )).all()
 
 
