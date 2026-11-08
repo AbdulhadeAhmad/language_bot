@@ -193,7 +193,7 @@ class Handlers:
 
     async def callback(self, callback):
         if (callback.data or "").startswith(
-            ("library:", "entry:", "archive:", "generate:", "play:", "edit:")
+            ("library:", "entry:", "archive:", "generate:", "play:", "edit:", "editen:")
         ):
             user = await self.session.get(User, callback.from_user.id)
             approved = callback.from_user.id == self.settings.admin_telegram_id or (
@@ -212,6 +212,8 @@ class Handlers:
                     answer = await self.play_audio(value)
                 elif command == "edit":
                     answer = await self.begin_edit(value)
+                elif command == "editen":
+                    answer = await self.begin_edit(value, field="english")
                 else:
                     answer = await self.archive_retry(value)
             self.emit(
@@ -317,7 +319,14 @@ class Handlers:
                 await self.session.delete(edit)
                 self.say("Entry changed while you were editing. Your draft was discarded.")
                 return
-            german = message.text.strip()
+            value = message.text.strip()
+            if edit.step == "english":
+                sentence.english = value
+                await self.session.delete(edit)
+                self.say("English translation updated. German audio is unchanged.")
+                await self.entry(str(sentence.id))
+                return
+            german = value
             job = await self.session.get(SentenceEditJob, sentence.id, with_for_update=True)
             if job is None:
                 job = SentenceEditJob(
@@ -507,7 +516,8 @@ class Handlers:
                 label = "Retry German audio" if generated else "Generate German audio"
                 keyboard.add(InlineKeyboardButton(label, callback_data=f"generate:{row.id}"))
         keyboard.add(InlineKeyboardButton("Refresh entry", callback_data=f"entry:{row.id}"))
-        keyboard.add(InlineKeyboardButton("Edit text", callback_data=f"edit:{row.id}"))
+        keyboard.add(InlineKeyboardButton("Edit German", callback_data=f"edit:{row.id}"))
+        keyboard.add(InlineKeyboardButton("Edit English", callback_data=f"editen:{row.id}"))
         for index in range(0, len(result), 4000):
             self.say(
                 result[index : index + 4000],
@@ -516,7 +526,7 @@ class Handlers:
             )
         return "Entry opened."
 
-    async def begin_edit(self, value):
+    async def begin_edit(self, value, field="german"):
         from uuid import UUID
 
         from app.db.models import InteractionState
@@ -536,15 +546,18 @@ class Handlers:
                 kind="sentence_edit",
                 sentence_id=sentence.id,
                 sentence_revision=sentence.revision,
-                step="german",
+                step=field,
             )
             self.session.add(state)
         else:
             state.kind, state.sentence_id, state.sentence_revision, state.step, state.german = (
-                "sentence_edit", sentence.id, sentence.revision, "german", None
+                "sentence_edit", sentence.id, sentence.revision, field, None
             )
+        if field == "english":
+            self.say("Send the new English translation (up to 1,000 characters). Use /cancel to stop.")
+            return "English edit started."
         self.say("Send the new German sentence (up to 1,000 characters). Its English translation will be regenerated. Use /cancel to stop.")
-        return "Text edit started."
+        return "German edit started."
 
     async def generate_audio(self, value):
         from uuid import UUID

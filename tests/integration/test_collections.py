@@ -199,18 +199,25 @@ async def test_german_edit_translates_durably_and_revision_fences_audio(db, conf
     transport = RecordingTransport()
     await dispatch(db, config, transport, callback(f"edit:{sentence_id}", user=22))
     assert transport.sent[-1][1]["text"] == "Entry unavailable."
+    await dispatch(db, config, transport, callback(f"editen:{sentence_id}"))
+    await dispatch(db, config, transport, payload(2, text="Morning, hello!"))
+    async with db.sessions() as session:
+        sentence = await session.get(Sentence, sentence_id)
+        asset, audio_job = await session.get(AudioAsset, asset_id), await session.get(AudioJob, asset_id)
+        assert sentence.german == "Guten Morgen" and sentence.english == "Morning, hello!"
+        assert sentence.revision == 1 and asset.active and audio_job.state == "pending"
     await dispatch(db, config, transport, callback(f"edit:{sentence_id}"))
-    await dispatch(db, config, transport, payload(2, text="/cancel"))
+    await dispatch(db, config, transport, payload(3, text="/cancel"))
     async with db.sessions() as session:
         assert await session.get(InteractionState, 11) is None
         assert (await session.get(Sentence, sentence_id)).german == "Guten Morgen"
     await dispatch(db, config, transport, callback(f"edit:{sentence_id}"))
-    await dispatch(db, config, transport, payload(3, text="Guten Tag!"))
+    await dispatch(db, config, transport, payload(4, text="Guten Tag!"))
     async with db.sessions() as session:
         assert await session.get(InteractionState, 11) is None
         sentence = await session.get(Sentence, sentence_id)
         job = await session.get(SentenceEditJob, sentence_id)
-        assert sentence.german == "Guten Morgen" and sentence.english == "Good morning"
+        assert sentence.german == "Guten Morgen" and sentence.english == "Morning, hello!"
         assert job and job.state == "pending" and job.german == "Guten Tag!"
     await EditRunner(db, config, transport, FakeModels()).process_one()
     async with db.sessions() as session:
