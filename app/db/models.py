@@ -50,9 +50,31 @@ class InteractionState(Base):
     sentence_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("sentences.id", ondelete="CASCADE")
     )
+    sentence_revision: Mapped[int] = mapped_column(Integer)
     step: Mapped[str] = mapped_column(String(16))
     german: Mapped[str | None] = mapped_column(String)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SentenceEditJob(Base):
+    __tablename__ = "sentence_edit_jobs"
+    __table_args__ = (
+        CheckConstraint("state IN ('pending','running','done','failed','cancelled')", name="sentence_edit_job_state"),
+        Index("ix_sentence_edit_jobs_ready", "state", "available_at"),
+    )
+    sentence_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("sentences.id", ondelete="CASCADE"), primary_key=True
+    )
+    base_revision: Mapped[int] = mapped_column(Integer)
+    target_revision: Mapped[int] = mapped_column(Integer)
+    generation: Mapped[int] = mapped_column(Integer, server_default="0")
+    german: Mapped[str] = mapped_column(String)
+    state: Mapped[str] = mapped_column(String(16), server_default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, server_default="0")
+    error_type: Mapped[str | None] = mapped_column(String(100))
+    available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    claim_token: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
 
 
 class Voice(Base):

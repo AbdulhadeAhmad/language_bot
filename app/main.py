@@ -15,6 +15,7 @@ from app.logging import configure_logging
 from app.providers.http import ModelClient
 from app.services.archive import ArchiveRunner
 from app.services.audio import AudioRunner
+from app.services.edits import EditRunner
 from app.services.operations import OperationRunner
 from app.services.telegram import handle_update
 
@@ -44,6 +45,7 @@ def create_app(
             tasks.append(
                 asyncio.create_task(OperationRunner(database, settings, transport, models).serve())
             )
+            tasks.append(asyncio.create_task(EditRunner(database, settings, transport, models).serve()))
             if settings.telegram_archive_enabled:
                 tasks.append(
                     asyncio.create_task(ArchiveRunner(database, settings, transport).serve())

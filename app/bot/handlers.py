@@ -306,43 +306,36 @@ class Handlers:
             if not message.text or not message.text.strip() or len(message.text.strip()) > 1000:
                 self.say("Send text up to 1,000 characters, or /cancel.")
                 return
-            value = message.text.strip()
-            if edit.step == "german":
-                edit.german, edit.step = value, "english"
-                self.say("Now send the English translation, or /cancel.")
-            else:
-                from app.db.models import AudioAsset, AudioJob, Sentence
-                from app.services.collections import has_duplicate, normalize_german
+            from app.db.models import Sentence, SentenceEditJob
 
-                sentence = await self.session.scalar(
-                    select(Sentence).where(
-                        Sentence.id == edit.sentence_id, Sentence.user_id == message.from_user.id
-                    ).with_for_update()
-                )
-                if sentence is None:
-                    await self.session.delete(edit)
-                    self.say("Entry unavailable. The edit was cancelled.")
-                    return
-                sentence.german = edit.german
-                sentence.normalized_german = normalize_german(edit.german)
-                sentence.english = value
-                sentence.revision += 1
-                sentence.duplicate_warning = await has_duplicate(
-                    self.session, message.from_user.id, edit.german, exclude_id=sentence.id
-                )
-                assets = (await self.session.scalars(
-                    select(AudioAsset).where(AudioAsset.sentence_id == sentence.id,
-                                             AudioAsset.kind == "generated", AudioAsset.active)
-                )).all()
-                for asset in assets:
-                    asset.active = False
-                    job = await self.session.get(AudioJob, asset.id, with_for_update=True)
-                    if job and job.state in {"pending", "running"}:
-                        job.state, job.error_type = "cancelled", "sentence_edited"
-                        job.claim_token, job.lease_until = None, None
+            sentence = await self.session.scalar(
+                select(Sentence).where(
+                    Sentence.id == edit.sentence_id, Sentence.user_id == message.from_user.id
+                ).with_for_update()
+            )
+            if sentence is None or sentence.revision != edit.sentence_revision:
                 await self.session.delete(edit)
-                self.say("Entry updated. German audio can be generated again from the saved entry.")
-                await self.entry(str(sentence.id))
+                self.say("Entry changed while you were editing. Your draft was discarded.")
+                return
+            german = message.text.strip()
+            job = await self.session.get(SentenceEditJob, sentence.id, with_for_update=True)
+            if job is None:
+                job = SentenceEditJob(
+                    sentence_id=sentence.id,
+                    base_revision=sentence.revision,
+                    target_revision=sentence.revision + 1,
+                    german=german,
+                )
+                self.session.add(job)
+            else:
+                job.base_revision = sentence.revision
+                job.target_revision = sentence.revision + 1
+                job.generation += 1
+                job.german = german
+                job.state, job.attempts, job.error_type = "pending", 0, None
+                job.available_at, job.claim_token, job.lease_until = func.now(), None, None
+            await self.session.delete(edit)
+            self.say("Translating your edit. The saved entry stays unchanged until translation succeeds.")
             return
         if command and command[0] == "/entry":
             await self.entry(command[1] if len(command) == 2 else "")
@@ -467,6 +460,11 @@ class Handlers:
         result = f"German:\n{row.german}\n\nEnglish:\n{row.english}"
         if row.duplicate_warning:
             result += "\n\nSimilar German text exists in your collection or a public collection."
+        from app.db.models import SentenceEditJob
+
+        edit_job = await self.session.get(SentenceEditJob, row.id)
+        if edit_job and edit_job.state in {"pending", "running"}:
+            result += "\n\nGerman edit: translation pending; current saved text is unchanged."
         from app.services.archive import original_recording
 
         original = await original_recording(self.session, self.incoming.actor_id, row.id)
@@ -537,14 +535,15 @@ class Handlers:
                 user_id=self.incoming.actor_id,
                 kind="sentence_edit",
                 sentence_id=sentence.id,
+                sentence_revision=sentence.revision,
                 step="german",
             )
             self.session.add(state)
         else:
-            state.kind, state.sentence_id, state.step, state.german = (
-                "sentence_edit", sentence.id, "german", None
+            state.kind, state.sentence_id, state.sentence_revision, state.step, state.german = (
+                "sentence_edit", sentence.id, sentence.revision, "german", None
             )
-        self.say("Send the new German sentence (up to 1,000 characters). Then send its English translation. Use /cancel to stop.")
+        self.say("Send the new German sentence (up to 1,000 characters). Its English translation will be regenerated. Use /cancel to stop.")
         return "Text edit started."
 
     async def generate_audio(self, value):

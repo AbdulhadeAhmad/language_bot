@@ -10,6 +10,7 @@ from app.db.models import (
     InteractionState,
     Operation,
     Sentence,
+    SentenceEditJob,
     StoredMedia,
     User,
 )
@@ -21,6 +22,7 @@ from app.services.collections import (
     normalize_german,
     save_capture,
 )
+from app.services.edits import EditRunner
 from app.services.operations import OperationRunner, retry_operation
 
 from .test_foundation import FakeModels, RecordingTransport, dispatch, payload
@@ -172,7 +174,7 @@ async def test_library_pagination_entry_callbacks_and_access_checks(db, config):
     assert "Use /library" in transport.sent[-1][1]["text"]
 
 
-async def test_text_edit_is_persisted_cancelable_and_revision_fenced(db, config):
+async def test_german_edit_translates_durably_and_revision_fences_audio(db, config):
     sentence_id, asset_id = uuid4(), uuid4()
     async with db.sessions.begin() as session:
         session.add_all([User(id=11, status="approved"), User(id=22, status="approved")])
@@ -198,16 +200,43 @@ async def test_text_edit_is_persisted_cancelable_and_revision_fenced(db, config)
     await dispatch(db, config, transport, callback(f"edit:{sentence_id}", user=22))
     assert transport.sent[-1][1]["text"] == "Entry unavailable."
     await dispatch(db, config, transport, callback(f"edit:{sentence_id}"))
-    await dispatch(db, config, transport, payload(2, text="Guten Tag!"))
+    await dispatch(db, config, transport, payload(2, text="/cancel"))
     async with db.sessions() as session:
-        state = await session.get(InteractionState, 11)
-        assert state and state.step == "english" and state.german == "Guten Tag!"
+        assert await session.get(InteractionState, 11) is None
         assert (await session.get(Sentence, sentence_id)).german == "Guten Morgen"
-    await dispatch(db, config, transport, payload(3, text="Good day!"))
+    await dispatch(db, config, transport, callback(f"edit:{sentence_id}"))
+    await dispatch(db, config, transport, payload(3, text="Guten Tag!"))
+    async with db.sessions() as session:
+        assert await session.get(InteractionState, 11) is None
+        sentence = await session.get(Sentence, sentence_id)
+        job = await session.get(SentenceEditJob, sentence_id)
+        assert sentence.german == "Guten Morgen" and sentence.english == "Good morning"
+        assert job and job.state == "pending" and job.german == "Guten Tag!"
+    await EditRunner(db, config, transport, FakeModels()).process_one()
     async with db.sessions() as session:
         sentence = await session.get(Sentence, sentence_id)
         asset, job = await session.get(AudioAsset, asset_id), await session.get(AudioJob, asset_id)
-        assert sentence.german == "Guten Tag!" and sentence.english == "Good day!"
+        edit_job = await session.get(SentenceEditJob, sentence_id)
+        assert sentence.german == "Guten Tag!" and sentence.english == "Good morning."
         assert sentence.revision == 2 and not sentence.duplicate_warning
         assert asset.active is False and job.state == "cancelled"
-        assert await session.get(InteractionState, 11) is None
+        assert edit_job.state == "done"
+
+
+async def test_stale_sentence_edit_result_cannot_overwrite_newer_revision(db, config):
+    sentence_id = uuid4()
+    async with db.sessions.begin() as session:
+        session.add(User(id=11, status="approved"))
+        await session.flush()
+        session.add(Sentence(id=sentence_id, user_id=11, german="Alt", english="Old", normalized_german="Alt"))
+        await session.flush()
+        session.add(SentenceEditJob(sentence_id=sentence_id, base_revision=1, target_revision=2, german="Neu"))
+    async with db.sessions.begin() as session:
+        (await session.get(Sentence, sentence_id, with_for_update=True)).revision = 2
+    runner = EditRunner(db, config, RecordingTransport(), FakeModels())
+    assert await runner.process_one()
+    async with db.sessions() as session:
+        sentence = await session.get(Sentence, sentence_id)
+        job = await session.get(SentenceEditJob, sentence_id)
+        assert sentence.german == "Alt" and sentence.english == "Old"
+        assert job.state == "cancelled"
