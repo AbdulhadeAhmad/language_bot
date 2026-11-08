@@ -2,7 +2,7 @@ from uuid import uuid4
 
 from sqlalchemy import select
 
-from app.db.models import AudioAsset, Sentence, StoredMedia, User
+from app.db.models import AudioAsset, ReviewCard, Sentence, StoredMedia, User
 from app.services.audio import playback_payload
 from app.services.deletion import delete_sentence
 from app.services.discovery import copy_public_sentence, search_public, set_privacy
@@ -69,11 +69,18 @@ async def test_discovery_privacy_rechecks_and_copies_are_independent(db, config)
     async with db.sessions() as session:
         copied = await session.scalar(select(Sentence).where(Sentence.user_id == 22))
         copied_assets = (await session.scalars(select(AudioAsset).where(AudioAsset.sentence_id == copied.id))).all()
+        copied_cards = (await session.scalars(
+            select(ReviewCard).where(ReviewCard.sentence_id == copied.id)
+        )).all()
         copied_user = await session.get(User, 22)
         assert copied.copied_from_sentence_id == source_id
         assert copied_user.private
         assert len(copied_assets) == 1 and copied_assets[0].kind == "generated"
         assert copied_assets[0].stored_media_id == generated_media_id
+        assert {card.mode for card in copied_cards} == {
+            "de_to_en", "en_to_de", "dictation", "listening"
+        }
+        assert all(card.first_reviewed_at is None and card.last_review_at is None for card in copied_cards)
         assert await playback_payload(session, 22, copied_assets[0].id)
 
     await dispatch(db, config, transport, payload(300, user=11, text="/privacy"))

@@ -6,6 +6,7 @@ from uuid import uuid4
 from sqlalchemy import or_, select
 
 from app.db.models import ArchiveJob, AudioAsset, Operation, Sentence, StoredMedia, User
+from app.services.scheduling import ensure_review_cards
 
 DUPLICATE_WARNING = "Similar German text already exists in your collection or a public collection."
 
@@ -79,6 +80,7 @@ async def save_capture(session, claimed):
     )
     session.add(sentence)
     await session.flush()
+    await ensure_review_cards(session, sentence)
     if operation.source_file_id:
         media = StoredMedia(id=uuid4(), telegram_file_id=operation.source_file_id)
         session.add(media)

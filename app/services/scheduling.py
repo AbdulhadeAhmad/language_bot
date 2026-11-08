@@ -3,6 +3,9 @@
 from datetime import datetime, timezone
 
 from fsrs import Card, Rating, Scheduler
+from sqlalchemy import select
+
+from app.db.models import ReviewCard, Sentence
 
 DESIRED_RETENTION = 0.9
 _RATINGS = {
@@ -11,6 +14,7 @@ _RATINGS = {
     3: Rating.Good,
     4: Rating.Easy,
 }
+REVIEW_MODES = ("de_to_en", "en_to_de", "dictation", "listening")
 
 
 def _utc(value: datetime) -> datetime:
@@ -35,3 +39,20 @@ def review_card(card_state: dict, rating: int, now: datetime) -> tuple[dict, dic
         review_datetime=_utc(now),
     )
     return updated.to_dict(), log.to_dict()
+
+
+async def ensure_review_cards(session, sentence: Sentence, now: datetime | None = None) -> None:
+    """Create only missing mode cards; copied entries always receive fresh schedules."""
+    now = _utc(now or datetime.now(timezone.utc))
+    existing = set((await session.scalars(
+        select(ReviewCard.mode).where(ReviewCard.sentence_id == sentence.id)
+    )).all())
+    for mode in REVIEW_MODES:
+        if mode not in existing:
+            session.add(ReviewCard(
+                sentence_id=sentence.id,
+                mode=mode,
+                card_state=new_card(now),
+                due_at=now,
+                content_revision=sentence.revision,
+            ))

@@ -6,6 +6,7 @@ from sqlalchemy import func, or_, select
 
 from app.db.models import AudioAsset, Sentence, StoredMedia, User
 from app.services.collections import has_duplicate, normalize_german
+from app.services.scheduling import ensure_review_cards
 
 
 def _public_sentence_query():
@@ -100,6 +101,7 @@ async def copy_public_sentence(session, user_id, sentence_id):
     )
     session.add(sentence)
     await session.flush()
+    await ensure_review_cards(session, sentence)
     assets = (await session.scalars(
         select(AudioAsset)
         .join(StoredMedia, StoredMedia.id == AudioAsset.stored_media_id)

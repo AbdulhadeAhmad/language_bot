@@ -9,10 +9,12 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    SmallInteger,
     String,
     UniqueConstraint,
     func,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -218,6 +220,76 @@ class User(Base):
     approval_message_id: Mapped[int | None] = mapped_column(BigInteger)
     approval_notice_state: Mapped[str] = mapped_column(String(16), server_default="pending")
     version: Mapped[int] = mapped_column(Integer, server_default="0")
+
+
+class ReviewCard(Base):
+    __tablename__ = "review_cards"
+    __table_args__ = (
+        CheckConstraint(
+            "mode IN ('de_to_en','en_to_de','dictation','listening')", name="review_card_mode"
+        ),
+        Index("ix_review_cards_due", "mode", "due_at"),
+    )
+    sentence_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("sentences.id", ondelete="CASCADE"), primary_key=True
+    )
+    mode: Mapped[str] = mapped_column(String(24), primary_key=True)
+    card_state: Mapped[dict] = mapped_column(JSONB)
+    due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_review_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    first_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    content_revision: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ReviewSession(Base):
+    __tablename__ = "review_sessions"
+    __table_args__ = (
+        CheckConstraint("mode IN ('de_to_en','en_to_de','dictation','listening')", name="review_session_mode"),
+        CheckConstraint("state IN ('active','completed','cancelled')", name="review_session_state"),
+        Index(
+            "uq_active_review_session_user", "user_id", unique=True,
+            postgresql_where="state = 'active'",
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    mode: Mapped[str] = mapped_column(String(24))
+    state: Mapped[str] = mapped_column(String(16), server_default="active")
+    current_sentence_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("sentences.id", ondelete="SET NULL")
+    )
+    question_number: Mapped[int] = mapped_column(Integer, server_default="0")
+    question_revision: Mapped[int | None] = mapped_column(Integer)
+    questions_answered: Mapped[int] = mapped_column(Integer, server_default="0")
+    new_cards_seen: Mapped[int] = mapped_column(Integer, server_default="0")
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ReviewAttempt(Base):
+    __tablename__ = "review_attempts"
+    __table_args__ = (
+        CheckConstraint("mode IN ('de_to_en','en_to_de','dictation','listening')", name="review_attempt_mode"),
+        CheckConstraint("rating BETWEEN 1 AND 4", name="review_attempt_rating"),
+        UniqueConstraint("session_id", "question_number", name="uq_review_attempt_question"),
+        Index("ix_review_attempts_sentence", "sentence_id", "mode", "reviewed_at"),
+    )
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    session_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("review_sessions.id", ondelete="CASCADE")
+    )
+    sentence_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("sentences.id", ondelete="CASCADE")
+    )
+    mode: Mapped[str] = mapped_column(String(24))
+    question_number: Mapped[int] = mapped_column(Integer)
+    sentence_revision: Mapped[int] = mapped_column(Integer)
+    rating: Mapped[int] = mapped_column(SmallInteger)
+    submitted_answer: Mapped[str | None] = mapped_column(String)
+    reviewed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class AccessChange(Base):
