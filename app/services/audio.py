@@ -163,11 +163,15 @@ async def playback_payload(session, user_id, asset_id):
         select(StoredMedia)
         .join(AudioAsset, AudioAsset.stored_media_id == StoredMedia.id)
         .join(Sentence, Sentence.id == AudioAsset.sentence_id)
+        .join(User, User.id == Sentence.user_id)
         .where(
             AudioAsset.id == asset_id,
             AudioAsset.active,
             AudioAsset.state == "ready",
-            Sentence.user_id == user_id,
+            or_(
+                Sentence.user_id == user_id,
+                and_(User.private.is_(False), User.status == "approved"),
+            ),
             StoredMedia.archive_message_id.is_not(None),
             StoredMedia.delete_pending.is_(False),
             StoredMedia.archive_chat_id.is_not(None),

@@ -194,7 +194,7 @@ class Handlers:
 
     async def callback(self, callback):
         if (callback.data or "").startswith(
-            ("library:", "entry:", "archive:", "generate:", "generateall:", "regenerate:", "play:", "edit:", "editen:", "replace:", "deleteaudio:", "deleteentry:", "confirmdelete:", "canceldelete:")
+            ("library:", "entry:", "archive:", "generate:", "generateall:", "regenerate:", "play:", "edit:", "editen:", "replace:", "deleteaudio:", "deleteentry:", "confirmdelete:", "canceldelete:", "privacy:", "discover:", "latest:", "random:", "publicentry:", "copy:", "playpublic:")
         ):
             user = await self.session.get(User, callback.from_user.id)
             approved = callback.from_user.id == self.settings.admin_telegram_id or (
@@ -215,6 +215,8 @@ class Handlers:
                     answer = await self.regenerate_audio(value)
                 elif command == "play":
                     answer = await self.play_audio(value)
+                elif command == "playpublic":
+                    answer = await self.play_audio(value)
                 elif command == "edit":
                     answer = await self.begin_edit(value)
                 elif command == "editen":
@@ -229,6 +231,18 @@ class Handlers:
                     answer = await self.remove_entry(value)
                 elif command == "canceldelete":
                     answer = "Entry deletion cancelled."
+                elif command == "privacy":
+                    answer = await self.change_privacy(value)
+                elif command == "discover":
+                    answer = await self.discover_menu()
+                elif command == "latest":
+                    answer = await self.latest_public_entries(value)
+                elif command == "random":
+                    answer = await self.random_public_entry()
+                elif command == "publicentry":
+                    answer = await self.public_entry(value)
+                elif command == "copy":
+                    answer = await self.copy_public_entry(value)
                 else:
                     answer = await self.archive_retry(value)
             self.emit(
@@ -311,6 +325,21 @@ class Handlers:
         command = text.split(maxsplit=1)
         if command and command[0] == "/library":
             await self.library(command[1] if len(command) == 2 else "0")
+            return
+        if command and command[0] == "/privacy":
+            await self.privacy_menu()
+            return
+        if command and command[0] == "/discover":
+            await self.discover_menu()
+            return
+        if command and command[0] == "/latest":
+            await self.latest_public_entries(command[1] if len(command) == 2 else "0")
+            return
+        if command and command[0] == "/random":
+            await self.random_public_entry()
+            return
+        if command and command[0] == "/search":
+            await self.search_public_entries(text.partition(" ")[2])
             return
         if text.strip() == "/cancel":
             await self.session.execute(
@@ -853,6 +882,146 @@ class Handlers:
         if not await retry_archive(self.session, self.incoming.actor_id, sentence_id):
             return "No failed archive belongs to you for this entry."
         return "Retrying the archive. Open the entry to check progress."
+
+    async def privacy_menu(self):
+        user = await self.session.get(User, self.incoming.actor_id)
+        if user is None or user.status != "approved":
+            self.say("Approved access is required to change privacy.")
+            return "Privacy unavailable."
+        keyboard = InlineKeyboardMarkup()
+        next_state = "public" if user.private else "private"
+        label = "Make collection public" if user.private else "Make collection private"
+        keyboard.add(InlineKeyboardButton(label, callback_data=f"privacy:{next_state}"))
+        self.say(
+            "Your collection is currently private." if user.private else "Your collection is currently public.",
+            keyboard=keyboard,
+        )
+        return "Privacy settings opened."
+
+    async def change_privacy(self, value):
+        from app.services.discovery import set_privacy
+
+        if value not in {"private", "public"}:
+            return "Invalid privacy setting."
+        private = value == "private"
+        result = await set_privacy(self.session, self.incoming.actor_id, private=private)
+        if result is None:
+            return "Approved access is required to change privacy."
+        self.say("Your collection is now private." if result else "Your collection is now public.")
+        return "Privacy updated."
+
+    async def discover_menu(self):
+        keyboard = InlineKeyboardMarkup()
+        keyboard.add(InlineKeyboardButton("Latest public entries", callback_data="latest:0"))
+        keyboard.add(InlineKeyboardButton("Random public entry", callback_data="random:0"))
+        self.say("Search public entries with /search WORDS.", keyboard=keyboard)
+        return "Discovery opened."
+
+    def public_results(self, rows, title, page=None):
+        if not rows:
+            self.say(f"{title}\nNo public entries found.")
+            return
+        keyboard = InlineKeyboardMarkup()
+        for row in rows[:5]:
+            label = " ".join(row.german.split())[:60]
+            keyboard.add(InlineKeyboardButton(label, callback_data=f"publicentry:{row.id}"))
+        if page is not None:
+            if page:
+                keyboard.add(InlineKeyboardButton("Previous", callback_data=f"latest:{page - 1}"))
+            if len(rows) > 5:
+                keyboard.add(InlineKeyboardButton("Next", callback_data=f"latest:{page + 1}"))
+        self.say(title, keyboard=keyboard)
+
+    async def latest_public_entries(self, value="0"):
+        from app.services.discovery import latest_public
+
+        if not value.isascii() or not value.isdigit() or len(value) > 6 or int(value) > 100000:
+            return "Invalid page. Use /latest PAGE, starting at 0."
+        page = int(value)
+        rows = await latest_public(self.session, page)
+        self.public_results(rows, f"Latest public entries · Page {page + 1}", page)
+        return "Latest public entries opened."
+
+    async def search_public_entries(self, query):
+        from app.services.discovery import search_public
+
+        if not query.strip() or len(query.strip()) > 100:
+            self.say("Use /search WORDS (up to 100 characters).")
+            return "Search query required."
+        rows = await search_public(self.session, query)
+        self.public_results(rows, f"Public search: {query.strip()}")
+        return "Public search complete."
+
+    async def random_public_entry(self):
+        from app.services.discovery import random_public
+
+        sentence = await random_public(self.session)
+        if sentence is None:
+            self.say("No public entries are available yet.")
+            return "No public entries."
+        await self.public_entry(str(sentence.id))
+        return "Random public entry opened."
+
+    async def public_entry(self, value):
+        from uuid import UUID
+
+        from app.db.models import AudioAsset, StoredMedia, Voice
+        from app.services.discovery import public_sentence
+
+        try:
+            sentence_id = UUID(value)
+        except ValueError:
+            return "Entry unavailable."
+        sentence = await public_sentence(self.session, sentence_id)
+        if sentence is None:
+            self.say("Entry unavailable.")
+            return "Entry unavailable."
+        keyboard = InlineKeyboardMarkup()
+        assets = (await self.session.scalars(
+            select(AudioAsset)
+            .join(StoredMedia, StoredMedia.id == AudioAsset.stored_media_id)
+            .where(
+                AudioAsset.sentence_id == sentence.id,
+                AudioAsset.active.is_(True),
+                AudioAsset.state == "ready",
+                StoredMedia.archive_chat_id.is_not(None),
+                StoredMedia.archive_message_id.is_not(None),
+                StoredMedia.delete_pending.is_(False),
+            )
+        )).all()
+        for asset in assets:
+            if asset.kind == "original":
+                label = "Play original recording"
+            else:
+                voice = await self.session.get(Voice, asset.voice_id)
+                name = voice.id.split("-", 1)[-1].replace("-", " ").replace("_", " ").title() if voice else "German voice"
+                label = f"Play {name}"
+            keyboard.add(InlineKeyboardButton(label, callback_data=f"playpublic:{asset.id}"))
+        keyboard.add(InlineKeyboardButton("Copy to my collection", callback_data=f"copy:{sentence.id}"))
+        keyboard.add(InlineKeyboardButton("Another random entry", callback_data="random:0"))
+        self.say(f"German:\n{sentence.german}\n\nEnglish:\n{sentence.english}", keyboard=keyboard)
+        return "Public entry opened."
+
+    async def copy_public_entry(self, value):
+        from uuid import UUID
+
+        from app.services.discovery import copy_public_sentence
+
+        try:
+            sentence_id = UUID(value)
+        except ValueError:
+            return "Entry unavailable."
+        copied = await copy_public_sentence(self.session, self.incoming.actor_id, sentence_id)
+        if copied is None:
+            return "Entry is no longer public."
+        keyboard = InlineKeyboardMarkup()
+        keyboard.add(InlineKeyboardButton("Open copied entry", callback_data=f"entry:{copied.id}"))
+        self.say(
+            "Copied to your private collection."
+            + (" Similar German text exists in your collection or public collections." if copied.duplicate_warning else ""),
+            keyboard=keyboard,
+        )
+        return "Copied to your collection."
 
     def status_effect(self, operation):
         self.say(
