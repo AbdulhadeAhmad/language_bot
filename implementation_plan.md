@@ -15,8 +15,8 @@ Move each milestone through **Not started → In progress → Verification → D
 | M4 — Durable jobs and archive storage | Done | Archive queue, migration/backfill, server-side media adapter, leases/heartbeats, bounded retries, orphan logging, and owner-only retry controls implemented. 17 unit and 40 PostgreSQL integration tests pass. Owner explicitly approved and activated copying to the configured private channel; 4 live recordings archived successfully in one attempt each, with no duplicate assets/receipts. All services healthy and deployed schema matches code. |
 | M5 — Voice and text capture | Done | Capture/library/archive flow, original playback, and on-demand Thorsten speech generation deployed healthy. 22 unit and 48 PostgreSQL integration tests pass. Owner explicitly approved generated-audio activation; live synthesis, MP3 archive upload/read-back, owner playback controls, and model-file cleanup verified. Multi-user/discovery behavior will be extended at M7. |
 | M6 — Editing and deletion | Done | German edits use persisted translation jobs, retain old text until translation succeeds, advance revisions, and requeue previously used voices. English-only edits preserve the German revision/audio. Original and generated-audio replacements are staged; failures preserve the working version and can be retried. Configured voices can be generated individually or all missing voices together. Audio removal and confirmed entry deletion enqueue durable cleanup that deletes archive messages only when no active assets reference them. `/cancel`, duplicate warnings, owner checks, and late-worker fencing are covered. 24 unit and 55 PostgreSQL integration tests pass. Migration `0010_media_cleanup` is deployed; all five Compose services are healthy. |
-| M7 — Privacy, discovery, and copying | In progress | Private/public toggles, literal German/English search with page navigation, latest/random discovery, anonymous public details/playback, and independent copies with generated-audio references and immediate-source provenance are implemented. Public access rechecks approval/privacy on each read and copies remain private by default. Verification: 24 unit and 59 PostgreSQL integration tests pass; Ruff and `git diff --check` pass. Search pagination deployed; all five Compose services report healthy. Telegram two-account acceptance remains to verify. |
-| M8 — Practice and FSRS | Not started | |
+| M7 — Privacy, discovery, and copying | Verification | Private/public toggles, literal German/English search with page navigation, latest/random discovery, anonymous public details/playback, and independent copies with generated-audio references and immediate-source provenance are implemented. Public access rechecks approval/privacy on each read and copies remain private by default. Verification: 24 unit and 59 PostgreSQL integration tests pass; Ruff and `git diff --check` pass. Search pagination deployed; all five Compose services report healthy. Verify fresh per-mode review state for copies alongside M8 card initialization before closing M7. |
+| M8 — Practice and FSRS | In progress | Pinned official `fsrs` package 6.3.1 and added a JSON-safe adapter using 90% target retention, with all four grades and UTC timestamp checks covered by unit tests. Persistent per-entry/mode cards, sessions, Telegram practice flows, and content-change schedule resets remain. |
 | M9 — Reminders and recovery | Not started | |
 | M10 — Validation and deployment | Not started | |
 
@@ -343,12 +343,20 @@ Track each milestone as **Not started → In progress → Verification → Done*
 
 | 2026-11-03 | Expand TTS evaluation to more Piper voices plus Qwen3-TTS 0.6B on CPU, in an isolated environment. | Owner selected the broader comparison; no final TTS provider or voices approved yet. |
 
+| 2026-11-08 | Use py-fsrs 6.3.1 (FSRS 6) with its documented default model parameters and 90% desired retention. | The current official package documents `Scheduler`, `Card`, `Rating`, and JSON serialization; default parameters are recommended unless optimizing from review history. [Project README](https://github.com/open-spaced-repetition/py-fsrs), [release history](https://github.com/open-spaced-repetition/py-fsrs/releases). |
+
 ### 2026-11-08 — M7 public search pagination
 
 - Added paginated public German/English search with previous/next controls. Pagination callbacks carry only the page number; the query is read from the search-result message, staying within Telegram callback-data limits for the full 100-character query. Each page runs the public visibility query again.
 - Verification: 24 unit tests and 57 PostgreSQL integration tests passed; Ruff and `git diff --check` passed. The integration scenario verifies page navigation and that an old search page stops returning entries after privacy is switched to private.
 - Rebuilt and recreated only the API. The image source/package consistency check passed; all five Compose services report healthy and `/health/ready` returned HTTP 200.
 - Added PostgreSQL coverage for repeated copies, duplicate warnings, immediate-source provenance when copying a copy, and deletion of a source/intermediate copy while downstream copies and their shared generated media remain active. Their source references clear through the foreign key. Latest-feed pagination and random discovery also verify private entries stay hidden. Full suite passes 24 unit and 59 integration tests.
+
+### 2026-11-08 — M8 FSRS adapter
+
+- Added and locked `fsrs==6.3.1`, the current official FSRS 6 Python package. The adapter stores only JSON-safe card/log snapshots and maps Again/Hard/Good/Easy to the package's ratings at a normalized UTC timestamp with 90% desired retention.
+- Verification: 34 unit tests pass, including all four grades, JSON round-tripping, alternate timezone normalization, invalid grades, and naive timestamp rejection. Ruff passes.
+- No database schema or user-facing flow has changed in this slice. Next: persist review cards/sessions, then implement flashcard rendering and fenced grading.
 
 ## 6. Execution log
 
