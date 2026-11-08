@@ -333,6 +333,7 @@ class Handlers:
                 .values(id=self.settings.admin_telegram_id, status="approved")
                 .on_conflict_do_nothing()
             )
+            user = await self.session.get(User, self.settings.admin_telegram_id)
         text = message.text or ""
         command = text.split(maxsplit=1)
         if command and command[0] == "/library":
@@ -1083,6 +1084,11 @@ class Handlers:
                 self.session, self.incoming.actor_id, review_session.current_audio_asset_id
             )
             if audio_payload is None:
+                review_session.state = "cancelled"
+                review_session.current_sentence_id = None
+                review_session.current_audio_asset_id = None
+                review_session.awaiting_answer = False
+                review_session.completed_at = datetime.now(UTC)
                 self.say("The selected audio is no longer available. Start a new session.")
                 return False
             self.emit("review-audio", "copy_message", audio_payload)
