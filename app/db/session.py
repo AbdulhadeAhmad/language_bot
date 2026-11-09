@@ -1,7 +1,7 @@
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 
-SCHEMA_REVISION = "0013_review_limits"
+SCHEMA_REVISION = "0014_daily_reminders"
 
 
 class Database:

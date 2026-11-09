@@ -1,16 +1,18 @@
-from datetime import datetime
+from datetime import date, datetime, time
 from uuid import UUID
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     ForeignKey,
     Index,
     Integer,
     SmallInteger,
     String,
+    Time,
     UniqueConstraint,
     func,
 )
@@ -225,6 +227,10 @@ class User(Base):
     version: Mapped[int] = mapped_column(Integer, server_default="0")
     new_cards_per_day: Mapped[int] = mapped_column(Integer, server_default="10")
     review_session_limit: Mapped[int] = mapped_column(Integer, server_default="20")
+    reminder_enabled: Mapped[bool] = mapped_column(Boolean, server_default="false")
+    reminder_timezone: Mapped[str] = mapped_column(String(64), server_default="UTC")
+    reminder_time: Mapped[time] = mapped_column(Time(), server_default="20:00:00")
+    last_reminder_local_date: Mapped[date | None] = mapped_column(Date())
 
 
 class ReviewCard(Base):

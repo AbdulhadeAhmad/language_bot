@@ -349,7 +349,10 @@ class Handlers:
                 "/random — open a random public sentence\n"
                 "/search WORDS — search public sentences\n"
                 "/practice MODE — practice de_to_en, en_to_de, dictation, or listening\n"
+                "/resume — restore your active practice question\n"
                 "/reviewlimits NEW_PER_DAY SESSION_SIZE — set practice limits\n"
+                "/reminders HH:MM TIMEZONE — enable daily due-card reminders\n"
+                "/reminders off — disable daily reminders\n"
                 "/cancelpractice — stop your active practice session\n"
                 "/status — view recent processing jobs\n"
                 "/retry ID — retry a failed processing job\n"
@@ -386,8 +389,14 @@ class Handlers:
                 return
             await self.start_practice(command[1])
             return
+        if command and command[0] == "/resume":
+            await self.resume_practice()
+            return
         if command and command[0] == "/reviewlimits":
             await self.review_limits(text, user)
+            return
+        if command and command[0] == "/reminders":
+            await self.reminders(text, user)
             return
         if command and command[0] == "/cancelpractice":
             from app.services.reviews import cancel_session
@@ -1199,6 +1208,29 @@ class Handlers:
         review_session, sentence = result
         await self.review_question(review_session, sentence)
 
+    async def resume_practice(self):
+        from app.db.models import ReviewSession
+        from app.services.reviews import start_session
+
+        active = await self.session.scalar(
+            select(ReviewSession)
+            .where(
+                ReviewSession.user_id == self.incoming.actor_id,
+                ReviewSession.state == "active",
+            )
+            .order_by(ReviewSession.started_at.desc())
+        )
+        if active is None:
+            self.say("You have no active practice session to resume.")
+            return
+        result, _status = await start_session(
+            self.session, self.incoming.actor_id, active.mode
+        )
+        if result is None:
+            self.say("That practice question is no longer available. Start a new session with /practice MODE.")
+            return
+        await self.review_question(*result)
+
     async def review_limits(self, text, user):
         parts = text.split()
         if len(parts) == 1:
@@ -1220,6 +1252,52 @@ class Handlers:
         user.new_cards_per_day = new_limit
         user.review_session_limit = session_limit
         self.say(f"Review limits saved: {new_limit} new per day, {session_limit} per session.")
+
+    async def reminders(self, text, user):
+        from datetime import time
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+        parts = text.split()
+        if len(parts) == 1:
+            if user.reminder_enabled:
+                self.say(
+                    f"Daily review reminders are on at {user.reminder_time.strftime('%H:%M')} "
+                    f"({user.reminder_timezone}). Disable them with /reminders off."
+                )
+            else:
+                self.say(
+                    "Daily review reminders are off. Enable with /reminders HH:MM TIMEZONE, "
+                    "for example /reminders 20:00 Europe/Berlin."
+                )
+            return
+        if len(parts) == 2 and parts[1].lower() == "off":
+            user.reminder_enabled = False
+            self.say("Daily review reminders are off.")
+            return
+        if (
+            len(parts) != 3
+            or len(parts[1]) != 5
+            or parts[1][2] != ":"
+            or not parts[1][:2].isascii()
+            or not parts[1][:2].isdigit()
+            or not parts[1][3:].isascii()
+            or not parts[1][3:].isdigit()
+        ):
+            self.say(
+                "Use /reminders HH:MM TIMEZONE or /reminders off. "
+                "Example: /reminders 20:00 Europe/Berlin."
+            )
+            return
+        try:
+            reminder_time = time(int(parts[1][:2]), int(parts[1][3:]))
+            ZoneInfo(parts[2])
+        except (ValueError, ZoneInfoNotFoundError):
+            self.say("Use a valid 24-hour time and IANA timezone, such as 20:00 Europe/Berlin.")
+            return
+        user.reminder_enabled = True
+        user.reminder_time = reminder_time
+        user.reminder_timezone = parts[2]
+        self.say(f"Daily review reminders set for {parts[1]} ({user.reminder_timezone}).")
 
     async def submit_review_answer(self, answer):
         if not answer.strip():

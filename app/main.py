@@ -18,6 +18,7 @@ from app.services.audio import AudioRunner
 from app.services.deletion import MediaDeletionRunner
 from app.services.edits import EditRunner
 from app.services.operations import OperationRunner
+from app.services.reminders import ReminderRunner
 from app.services.telegram import handle_update
 
 MAX_UPDATE_BYTES = 512 * 1024
@@ -43,6 +44,9 @@ def create_app(
         configure_logging(settings.log_level)
         tasks = []
         if run_operations:
+            tasks.append(
+                asyncio.create_task(ReminderRunner(database, settings, transport).serve())
+            )
             tasks.append(
                 asyncio.create_task(OperationRunner(database, settings, transport, models).serve())
             )
