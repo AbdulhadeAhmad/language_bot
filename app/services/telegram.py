@@ -8,6 +8,7 @@ from uuid import UUID
 from sqlalchemy import select
 
 from app.bot.handlers import Handlers
+from app.bot.transport import RejectedDelivery
 from app.bot.updates import actor
 from app.db.models import Operation, User
 
@@ -29,10 +30,52 @@ async def handle_update(database, settings, transport, update):
         try:
             async with asyncio.timeout(settings.telegram_timeout_seconds):
                 message_id = await transport.send(effect["method"], effect["payload"])
+        except RejectedDelivery as exc:
+            logger.warning(
+                "telegram_effect_rejected",
+                extra={
+                    "user_id": identity[0],
+                    "effect_key": key,
+                    "method": effect["method"],
+                    "error_type": type(exc).__name__,
+                    "telegram_error_code": exc.telegram_error_code,
+                    "telegram_description": str(exc),
+                },
+            )
+            if key in {"entry", "library_page"} and effect["method"] == "edit_message_text":
+                payload = effect["payload"]
+                fallback = {
+                    name: payload[name]
+                    for name in ("chat_id", "text", "reply_markup", "parse_mode")
+                    if name in payload
+                }
+                try:
+                    async with asyncio.timeout(settings.telegram_timeout_seconds):
+                        await transport.send("send_message", fallback)
+                except Exception as fallback_exc:
+                    logger.warning(
+                        "telegram_effect_fallback_failed",
+                        extra={
+                            "user_id": identity[0],
+                            "effect_key": key,
+                            "error_type": type(fallback_exc).__name__,
+                            "telegram_error_code": getattr(
+                                fallback_exc, "telegram_error_code", None
+                            ),
+                            "telegram_description": str(fallback_exc),
+                        },
+                    )
+            continue
         except Exception as exc:
             logger.warning(
                 "telegram_effect_failed",
-                extra={"user_id": identity[0], "error_type": type(exc).__name__},
+                extra={
+                    "user_id": identity[0],
+                    "effect_key": key,
+                    "method": effect["method"],
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                },
             )
             async with database.sessions.begin() as session:
                 if key == "request":

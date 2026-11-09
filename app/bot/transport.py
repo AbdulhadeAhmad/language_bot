@@ -25,7 +25,7 @@ def delivery_error(exc):
         raise RetryAfter(int(seconds)) from None
     if exc.error_code >= 500:
         raise ConnectionError("Telegram server error") from None
-    raise RejectedDelivery("Telegram rejected the delivery") from None
+    raise RejectedDelivery(exc.description, telegram_error_code=exc.error_code) from None
 
 
 class RetryAfter(Exception):
@@ -35,6 +35,10 @@ class RetryAfter(Exception):
 
 class RejectedDelivery(Exception):
     """Telegram explicitly rejected the operation."""
+
+    def __init__(self, message, *, telegram_error_code=None):
+        super().__init__(message)
+        self.telegram_error_code = telegram_error_code
 
 
 class MissingStatusMessage(RejectedDelivery):
@@ -99,7 +103,9 @@ class BotTransport:
                     for value in ("message to edit not found", "message can't be edited")
                 )
             ):
-                raise MissingStatusMessage("Status message unavailable") from None
+                raise MissingStatusMessage(
+                    exc.description, telegram_error_code=exc.error_code
+                ) from None
             delivery_error(exc)
 
     async def upload_audio(

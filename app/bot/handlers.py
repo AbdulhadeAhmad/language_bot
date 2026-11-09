@@ -6,7 +6,7 @@ from sqlalchemy.dialects.postgresql import insert
 from telebot.async_telebot import AsyncTeleBot
 from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-from app.db.models import AccessChange, InteractionState, User
+from app.db.models import AccessChange, InteractionState, Sentence, User
 
 
 class PropagateErrors:
@@ -196,7 +196,7 @@ class Handlers:
 
     async def callback(self, callback):
         if (callback.data or "").startswith(
-            ("library:", "entry:", "archive:", "generate:", "generateall:", "regenerate:", "play:", "edit:", "editen:", "replace:", "deleteaudio:", "deleteentry:", "confirmdelete:", "canceldelete:", "privacy:", "discover:", "latest:", "search:", "random:", "publicentry:", "copy:", "playpublic:", "grade:")
+            ("library:", "entry:", "archive:", "generate:", "generateall:", "regenerate:", "regen:", "play:", "edit:", "editen:", "replace:", "deleteaudio:", "deleteentry:", "confirmdelete:", "canceldelete:", "privacy:", "discover:", "latest:", "search:", "random:", "publicentry:", "copy:", "playpublic:", "grade:")
         ):
             user = await self.session.get(User, callback.from_user.id)
             approved = callback.from_user.id == self.settings.admin_telegram_id or (
@@ -206,14 +206,14 @@ class Handlers:
             if approved and callback.message and callback.message.chat.type == "private":
                 command, value = callback.data.split(":", 1)
                 if command == "library":
-                    answer = await self.library(value)
+                    answer = await self.library(value, callback.message)
                 elif command == "entry":
-                    answer = await self.entry(value)
+                    answer = await self.entry(value, callback.message)
                 elif command == "generate":
                     answer = await self.generate_audio(value)
                 elif command == "generateall":
                     answer = await self.generate_all_audio(value)
-                elif command == "regenerate":
+                elif command in {"regenerate", "regen"}:
                     answer = await self.regenerate_audio(value)
                 elif command == "play":
                     answer = await self.play_audio(value)
@@ -336,6 +336,29 @@ class Handlers:
             user = await self.session.get(User, self.settings.admin_telegram_id)
         text = message.text or ""
         command = text.split(maxsplit=1)
+        if command and command[0] == "/help":
+            self.say(
+                "Available commands:\n"
+                "/start — register or check access\n"
+                "/help — show this command list\n"
+                "/library [PAGE] — browse your saved sentences\n"
+                "/entry ID — open a saved sentence\n"
+                "/privacy — change your collection privacy\n"
+                "/discover — browse public sentences\n"
+                "/latest [PAGE] — view recent public sentences\n"
+                "/random — open a random public sentence\n"
+                "/search WORDS — search public sentences\n"
+                "/practice MODE — practice de_to_en, en_to_de, dictation, or listening\n"
+                "/reviewlimits NEW_PER_DAY SESSION_SIZE — set practice limits\n"
+                "/cancelpractice — stop your active practice session\n"
+                "/status — view recent processing jobs\n"
+                "/retry ID — retry a failed processing job\n"
+                "/result ID — show the full result of a processing job\n"
+                "/cancel — cancel the current edit or recording replacement\n"
+                "/admin — list access requests (administrator only)\n"
+                "/admin grant TELEGRAM_ID — approve a user (administrator only)"
+            )
+            return
         if command and command[0] == "/library":
             await self.library(command[1] if len(command) == 2 else "0")
             return
@@ -562,7 +585,7 @@ class Handlers:
         if created:
             self.status_effect(operation)
 
-    async def library(self, value):
+    async def library(self, value, message=None):
         from app.services.collections import list_sentences
 
         if not value.isascii() or not value.isdigit() or len(value) > 7 or int(value) > 1000000:
@@ -571,9 +594,15 @@ class Handlers:
         page = int(value)
         rows = await list_sentences(self.session, self.incoming.actor_id, page)
         if not rows:
-            self.say(
-                "No saved entries on this page. Send German text or a voice recording to add one."
-            )
+            text = "No saved entries on this page. Send German text or a voice recording to add one."
+            if message is None:
+                self.say(text)
+            else:
+                self.emit(
+                    "library_page",
+                    "edit_message_text",
+                    {"chat_id": message.chat.id, "message_id": message.message_id, "text": text},
+                )
             return "No entries."
         keyboard = InlineKeyboardMarkup()
         for row in rows[:5]:
@@ -583,10 +612,28 @@ class Handlers:
             keyboard.add(InlineKeyboardButton("Previous", callback_data=f"library:{page - 1}"))
         if len(rows) > 5:
             keyboard.add(InlineKeyboardButton("Next", callback_data=f"library:{page + 1}"))
-        self.say(f"Your collection · Page {page + 1}", keyboard=keyboard)
+        total = await self.session.scalar(
+            select(func.count())
+            .select_from(Sentence)
+            .where(Sentence.user_id == self.incoming.actor_id)
+        )
+        text = f"Your collection · Page {page + 1} of {max(1, (total + 4) // 5)}"
+        if message is None:
+            self.say(text, keyboard=keyboard)
+        else:
+            self.emit(
+                "library_page",
+                "edit_message_text",
+                {
+                    "chat_id": message.chat.id,
+                    "message_id": message.message_id,
+                    "text": text,
+                    "reply_markup": keyboard.to_dict(),
+                },
+            )
         return "Collection opened."
 
-    async def entry(self, value):
+    async def entry(self, value, message=None):
         from uuid import UUID
 
         from app.services.collections import get_owned_sentence
@@ -600,6 +647,24 @@ class Handlers:
         if row is None:
             self.say("Entry unavailable.")
             return "Entry unavailable."
+        result, keyboard = await self.build_sentence_message(row)
+        if message is not None:
+            self.emit(
+                "entry",
+                "edit_message_text",
+                {
+                    "chat_id": message.chat.id,
+                    "message_id": message.message_id,
+                    "text": result,
+                    "reply_markup": keyboard.to_dict(),
+                },
+            )
+            return "Entry opened."
+        self.say(result, keyboard=keyboard)
+        return "Entry opened."
+
+    async def build_sentence_message(self, row):
+        """Build the detail text and inline controls for one sentence object."""
         result = f"German:\n{row.german}\n\nEnglish:\n{row.english}"
         if row.duplicate_warning:
             result += "\n\nSimilar German text exists in your collection or a public collection."
@@ -666,14 +731,16 @@ class Handlers:
                 result += f"\n\n{voice_name} replacement audio: {staged.state}."
                 if staged.state == "failed":
                     keyboard.add(InlineKeyboardButton(
-                        f"Retry {voice_name} replacement", callback_data=f"regenerate:{row.id}:{voice.id}"
+                        f"Retry {voice_name} replacement",
+                        callback_data=f"regen:{row.id.hex}:{voice.id}",
                     ))
             elif generated and generated.state == "ready":
                 keyboard.add(InlineKeyboardButton(
                     f"Play {voice_name}", callback_data=f"play:{generated.id}"
                 ))
                 keyboard.add(InlineKeyboardButton(
-                    f"Regenerate {voice_name}", callback_data=f"regenerate:{row.id}:{voice.id}"
+                    f"Regenerate {voice_name}",
+                    callback_data=f"regen:{row.id.hex}:{voice.id}",
                 ))
             elif self.settings.telegram_tts_enabled:
                 if generated and generated.state == "failed":
@@ -683,7 +750,7 @@ class Handlers:
                 if not generated or generated.state == "failed":
                     label = f"Retry {voice_name}" if generated else f"Generate {voice_name}"
                     keyboard.add(InlineKeyboardButton(
-                        label, callback_data=f"generate:{row.id}:{voice.id}"
+                        label, callback_data=f"generate:{row.id.hex}:{voice.id}"
                     ))
             if generated or staged:
                 target = staged or generated
@@ -698,13 +765,7 @@ class Handlers:
         keyboard.add(InlineKeyboardButton("Edit German", callback_data=f"edit:{row.id}"))
         keyboard.add(InlineKeyboardButton("Edit English", callback_data=f"editen:{row.id}"))
         keyboard.add(InlineKeyboardButton("Delete entry", callback_data=f"deleteentry:{row.id}"))
-        for index in range(0, len(result), 4000):
-            self.say(
-                result[index : index + 4000],
-                key=f"entry:{index}",
-                keyboard=keyboard if index == 0 else None,
-            )
-        return "Entry opened."
+        return result, keyboard
 
     async def remove_audio(self, value):
         from uuid import UUID
