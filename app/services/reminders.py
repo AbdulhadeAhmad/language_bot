@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import func, select
@@ -10,6 +10,18 @@ from sqlalchemy import func, select
 from app.db.models import ReviewCard, Sentence, User
 
 logger = logging.getLogger(__name__)
+
+
+def scheduled_local_minute(local_date, timezone: ZoneInfo, reminder_time: time):
+    """Resolve a wall-clock reminder minute, advancing across a DST spring gap."""
+    requested = datetime.combine(local_date, reminder_time.replace(second=0, microsecond=0))
+    for offset in range(181):
+        candidate = requested + timedelta(minutes=offset)
+        attached = candidate.replace(tzinfo=timezone)
+        round_trip = attached.astimezone(UTC).astimezone(timezone).replace(tzinfo=None)
+        if round_trip == candidate:
+            return candidate
+    return None
 
 
 class ReminderRunner:
@@ -64,12 +76,17 @@ class ReminderRunner:
             if user is None or user.status != "approved" or not user.reminder_enabled:
                 return None
             try:
-                local_now = now.astimezone(ZoneInfo(user.reminder_timezone))
+                timezone = ZoneInfo(user.reminder_timezone)
             except ZoneInfoNotFoundError:
                 logger.warning("daily_reminder_invalid_timezone", extra={"user_id": user_id})
                 return None
 
-            if local_now.strftime("%H:%M") != user.reminder_time.strftime("%H:%M"):
+            local_now = now.astimezone(timezone)
+            scheduled_minute = scheduled_local_minute(
+                local_now.date(), timezone, user.reminder_time
+            )
+            current_minute = local_now.replace(tzinfo=None, second=0, microsecond=0)
+            if current_minute != scheduled_minute:
                 return None
             if user.last_reminder_local_date == local_now.date():
                 return None

@@ -1276,6 +1276,7 @@ class Handlers:
             return
         if (
             len(parts) != 3
+            or len(parts[2]) > 64
             or len(parts[1]) != 5
             or parts[1][2] != ":"
             or not parts[1][:2].isascii()
