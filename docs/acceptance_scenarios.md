@@ -32,7 +32,7 @@ These scenarios translate `implementation_plan.md` into observable outcomes. The
 | A26 | M8 | Edit German, English, or audio on a reviewed sentence. | German resets all four cards; English resets both translation modes and listening meaning; audio alone resets none. History retains revision context. |
 | A27 | M8 | Required listening audio is missing. | Affected listening mode is unavailable until repaired; usable modes continue. |
 | A28 | M9 | Opt in to reminders, cross a timezone/DST boundary, then restart services. | At most one reminder per local date when due cards exist; no backlog replay. |
-| A29 | M4, M10 | Kill a worker during inference or archiving, then restart. | Durable work recovers; temporary files are cleaned; uncertain uploads are logged without duplicate active assets. |
+| A29 | M4, M10 | Kill a worker during inference or archiving, then restart. | Durable work recovers; temporary files are cleaned; uncertain uploads are logged without duplicate active assets. Live ASR interruption verified 2026-11-10: the model job was reclaimed on attempt 2 and its capture completed after the ASR container was force-stopped and restarted. |
 | A30 | M10 | Restore a database backup using the same bot and archive. | Settings, sentences, jobs, reviews, and archived playback references remain usable. |
 
 ## M0 review
