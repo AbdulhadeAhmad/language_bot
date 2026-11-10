@@ -213,7 +213,7 @@ Each milestone closes only when its acceptance checks pass. M1 benchmarking cont
 - Duplicate input creates a separate entry and shows an advisory warning when detected, without changing existing entries.
 - Two users can submit work and continue using settings, discovery, and saved-entry controls while processing runs. Verify discovery controls once M7 is available.
 
-### [ ] M6 — Complete editing, audio management, and deletion
+### [x] M6 — Complete editing, audio management, and deletion
 
 **Deliverables**
 
@@ -232,7 +232,7 @@ Each milestone closes only when its acceptance checks pass. M1 benchmarking cont
 - Old jobs cannot overwrite a newer edit or resurrect a deleted entry.
 - Deleting one entry cannot remove media still used by an independent copy.
 
-### [ ] M7 — Add privacy, discovery, and copying
+### [x] M7 — Add privacy, discovery, and copying
 
 **Deliverables**
 
@@ -255,7 +255,7 @@ Each milestone closes only when its acceptance checks pass. M1 benchmarking cont
 - Repeated intentional copies create independent entries and show a non-blocking warning when a match is detected.
 - Source deletion/private mode does not invalidate an existing copy.
 
-### [ ] M8 — Implement practice and FSRS
+### [x] M8 — Implement practice and FSRS
 
 **Deliverables**
 
@@ -282,7 +282,7 @@ Each milestone closes only when its acceptance checks pass. M1 benchmarking cont
 - Missing required text/audio makes only the affected mode temporarily unavailable.
 - Historical attempts remain distinguishable from attempts against edited content.
 
-### [ ] M9 — Add optional reminders and recovery checks
+### [x] M9 — Add optional reminders and recovery checks
 
 **Deliverables**
 
@@ -298,7 +298,7 @@ Each milestone closes only when its acceptance checks pass. M1 benchmarking cont
 - A blocked Telegram recipient does not interrupt other users’ work.
 - Database state can reconstruct the current processing and review UI.
 
-### [ ] M10 — Validate and deploy the first release
+### [x] M10 — Validate and deploy the first release
 
 **Deliverables**
 
