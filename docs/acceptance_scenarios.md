@@ -34,6 +34,7 @@ These scenarios translate `implementation_plan.md` into observable outcomes. The
 | A28 | M9 | Opt in to reminders, cross a timezone/DST boundary, then restart services. | At most one reminder per local date when due cards exist; no backlog replay. |
 | A29 | M4, M10 | Kill a worker during inference or archiving, then restart. | Durable work recovers; temporary files are cleaned; uncertain uploads are logged without duplicate active assets. Live ASR interruption verified 2026-11-10: the model job was reclaimed on attempt 2 and its capture completed after the ASR container was force-stopped and restarted. |
 | A30 | M10 | Restore a database backup using the same bot and archive. | Settings, sentences, jobs, reviews, and archived playback references remain usable. |
+| A31 | UI | An approved user opens the bot and uses only the persistent Library, Test, Discover, Settings, and Activity buttons, including reply prompts for search and settings. | Every primary workflow is reachable without typing a slash command; submenu buttons open the existing owner-checked flows, Home returns to navigation, and ordinary German text/voice submissions still work. |
 
 ## M0 review
 

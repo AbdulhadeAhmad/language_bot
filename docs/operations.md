@@ -10,6 +10,10 @@ Use `/help` for the complete command list. `/library` browses saved entries; `/e
 
 Daily reminders are opt-in. Set a local time and IANA timezone with `/reminders HH:MM TIMEZONE`, for example `/reminders 20:00 Europe/Berlin`; use `/reminders off` to disable them. The scheduler only sends when review cards are due, initializes missing cards for older saved entries, and sends at most one reminder per local date. It skips missed reminder windows after downtime rather than sending a backlog. A spring-forward time that does not exist advances to the first valid local minute; a fall-back repeated minute is fenced by the local-date marker. Reminder delivery failures are isolated per recipient.
 
+## Telegram home navigation
+
+Approved users receive a persistent home keyboard after `/start`: Library, Test, Discover, Settings, Activity, and Home. The section menus use inline buttons for sentence browsing, practice modes, public search/latest/random, privacy, review limits, reminders, and processing history/retries. Search, limits, reminder setup, and administrator access grants use Telegram reply prompts. The original slash commands remain available as shortcuts.
+
 ## Original-recording archive (opt-in)
 
 `TELEGRAM_ARCHIVE_ENABLED` defaults to `false`. Leave it disabled until the owner approves copying original recordings into the private channel identified by `TELEGRAM_MEDIA_CHANNEL_ID`. The bot needs permission to post there. No recordings are copied while disabled; captures and translation continue normally.

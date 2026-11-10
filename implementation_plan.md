@@ -329,6 +329,12 @@ Track each milestone as **Not started → In progress → Verification → Done*
 
 ## 5. Decision log
 
+### 2026-11-10 — Persistent home navigation
+
+- Owner requested a command-free Telegram UI. Added a persistent reply keyboard with Library, Test, Discover, Settings, Activity, and Home; administrators also get Admin.
+- Section options use inline buttons and existing owner/privacy checks. Search, practice limits, reminders, and access grants use reply prompts. Activity offers refresh, result viewing, and retries. Slash commands remain available as shortcuts.
+- Added acceptance scenario A31. Ruff and whitespace checks pass; API image built and deployed. All five Compose services are healthy. No automated tests were run for this change.
+
 | Date | Decision | Reason / reference |
 |---|---|---|
 | 2026-11-03 | Saved the agreed implementation plan; implementation milestones remain unstarted. | Planning conversation and project owner’s request to preserve the plan for future tracking. |

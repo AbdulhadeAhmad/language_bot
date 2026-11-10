@@ -1,10 +1,16 @@
+import json
 from datetime import UTC, datetime
 from uuid import uuid4
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from telebot.async_telebot import AsyncTeleBot
-from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup
+from telebot.types import (
+    ForceReply,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    ReplyKeyboardMarkup,
+)
 
 from app.db.models import AccessChange, InteractionState, Sentence, User
 from app.voice_catalog import voice_name as display_voice_name
@@ -47,10 +53,103 @@ class Handlers:
     def say(self, text, key="reply", user_id=None, keyboard=None, audience="status", parse_mode=None):
         payload = {"chat_id": user_id or self.incoming.actor_id, "text": text}
         if keyboard:
-            payload["reply_markup"] = keyboard.to_dict()
+            payload["reply_markup"] = (
+                keyboard.to_dict()
+                if isinstance(keyboard, InlineKeyboardMarkup)
+                else json.loads(keyboard.to_json())
+            )
         if parse_mode:
             payload["parse_mode"] = parse_mode
         self.emit(key, "send_message", payload, audience, user_id)
+
+    def home_keyboard(self, *, is_admin=False):
+        keyboard = ReplyKeyboardMarkup(resize_keyboard=True, is_persistent=True)
+        keyboard.row("📚 Library", "🧠 Test")
+        keyboard.row("🌍 Discover", "⚙️ Settings")
+        keyboard.row("📥 Activity", "🏠 Home")
+        if is_admin:
+            keyboard.row("🛡 Admin")
+        return keyboard
+
+    def home(self, user=None):
+        is_admin = self.incoming.actor_id == self.settings.admin_telegram_id
+        self.say(
+            "<b>German Pal</b>\nChoose a section below, or send German text/voice to add a sentence.",
+            keyboard=self.home_keyboard(is_admin=is_admin),
+            parse_mode="HTML",
+        )
+
+    def library_menu(self):
+        keyboard = InlineKeyboardMarkup()
+        keyboard.add(InlineKeyboardButton("Browse saved sentences", callback_data="library:0"))
+        keyboard.add(InlineKeyboardButton("Add a sentence", callback_data="addsentence:0"))
+        self.say("<b>Library</b>\nBrowse and manage your saved sentences.", keyboard=keyboard, parse_mode="HTML")
+
+    def test_menu(self):
+        keyboard = InlineKeyboardMarkup()
+        for label, mode in (
+            ("German → English", "de_to_en"),
+            ("English → German", "en_to_de"),
+            ("Dictation", "dictation"),
+            ("Listening", "listening"),
+        ):
+            keyboard.add(InlineKeyboardButton(label, callback_data=f"startpractice:{mode}"))
+        keyboard.row(
+            InlineKeyboardButton("Resume session", callback_data="resume:active"),
+            InlineKeyboardButton("Stop session", callback_data="cancelpractice:active"),
+        )
+        self.say("<b>Test</b>\nChoose a practice mode.", keyboard=keyboard, parse_mode="HTML")
+
+    def settings_menu(self, user):
+        keyboard = InlineKeyboardMarkup()
+        keyboard.add(InlineKeyboardButton("Collection privacy", callback_data="openprivacy:0"))
+        keyboard.add(InlineKeyboardButton("Practice limits", callback_data="limitsprompt:0"))
+        keyboard.add(InlineKeyboardButton("Daily reminders", callback_data="reminderprompt:0"))
+        keyboard.add(InlineKeyboardButton("Turn reminders off", callback_data="remindersoff:0"))
+        keyboard.add(InlineKeyboardButton("Cancel current edit", callback_data="canceledit:0"))
+        reminder = (
+            f"on at {user.reminder_time.strftime('%H:%M')} ({user.reminder_timezone})"
+            if user.reminder_enabled
+            else "off"
+        )
+        privacy = "private" if user.private else "public"
+        self.say(
+            f"<b>Settings</b>\nCollection: {privacy}\nDaily reminders: {reminder}\n"
+            f"New cards/day: {user.new_cards_per_day} · Session size: {user.review_session_limit}",
+            keyboard=keyboard,
+            parse_mode="HTML",
+        )
+
+    async def activity(self):
+        from app.db.models import Operation
+
+        rows = (await self.session.scalars(
+            select(Operation)
+            .where(Operation.user_id == self.incoming.actor_id)
+            .order_by(Operation.created_at.desc())
+            .limit(5)
+        )).all()
+        keyboard = InlineKeyboardMarkup()
+        lines = []
+        for row in rows:
+            lines.append(f"<code>{row.id}</code> · {row.step} · {row.state}")
+            if row.state in {"failed", "cancelled"}:
+                keyboard.row(
+                    InlineKeyboardButton("Retry", callback_data=f"retryop:{row.id}"),
+                    InlineKeyboardButton("Result", callback_data=f"resultop:{row.id}"),
+                )
+            elif row.state == "done":
+                keyboard.add(InlineKeyboardButton("View result", callback_data=f"resultop:{row.id}"))
+        if rows:
+            keyboard.add(InlineKeyboardButton("Refresh activity", callback_data="activity:0"))
+        self.say(
+            "<b>Recent activity</b>\n" + ("\n".join(lines) if lines else "No processing activity yet."),
+            keyboard=keyboard if keyboard.keyboard else None,
+            parse_mode="HTML",
+        )
+
+    def prompt(self, text, placeholder):
+        self.say(text, keyboard=ForceReply(selective=True, input_field_placeholder=placeholder))
 
     def buttons(self, user):
         keyboard = InlineKeyboardMarkup()
@@ -93,7 +192,10 @@ class Handlers:
                 " Use /admin to manage access."
                 if sender.id == self.settings.admin_telegram_id
                 else ""
-            )
+            ),
+            keyboard=self.home_keyboard(is_admin=sender.id == self.settings.admin_telegram_id)
+            if user.status == "approved"
+            else None,
         )
         if user.approval_notice_state == "pending" and user.status == "pending":
             user.approval_notice_state = "sending"
@@ -112,22 +214,26 @@ class Handlers:
             return
         parts = (message.text or "").split()
         if len(parts) == 3 and parts[1] == "grant":
-            try:
-                user_id = int(parts[2])
-                if not 0 < user_id < 2**63:
-                    raise ValueError()
-            except ValueError:
-                self.say("Use /admin grant TELEGRAM_ID with a positive numeric ID.")
-                return
-            await self.session.execute(insert(User).values(id=user_id).on_conflict_do_nothing())
-            user = await self.session.scalar(
-                select(User).where(User.id == user_id).with_for_update()
-            )
-            if user.status != "approved":
-                await self.change(user, "approved")
-            self.say(f"Access approved for {user_id}.")
+            await self.grant_user(parts[2])
             return
         await self.menu()
+
+    async def grant_user(self, value):
+        if self.incoming.actor_id != self.settings.admin_telegram_id:
+            self.say("Admin access required.")
+            return
+        try:
+            user_id = int(value.strip())
+            if not 0 < user_id < 2**63:
+                raise ValueError()
+        except ValueError:
+            self.say("Enter a positive numeric Telegram user ID.")
+            return
+        await self.session.execute(insert(User).values(id=user_id).on_conflict_do_nothing())
+        user = await self.session.scalar(select(User).where(User.id == user_id).with_for_update())
+        if user.status != "approved":
+            await self.change(user, "approved")
+        self.say(f"Access approved for {user_id}.")
 
     async def menu(self, status="all", page=0):
         counts = dict(
@@ -138,6 +244,7 @@ class Handlers:
         keyboard = InlineKeyboardMarkup()
         for label in ["pending", "approved", "rejected", "revoked", "all"]:
             keyboard.add(InlineKeyboardButton(label.title(), callback_data=f"list:{label}:0"))
+        keyboard.add(InlineKeyboardButton("Grant access by ID", callback_data="grantprompt:0"))
         self.say(
             "Users: "
             + str(sum(counts.values()))
@@ -145,7 +252,7 @@ class Handlers:
             + "\n".join(
                 f"{s}: {counts.get(s, 0)}" for s in ["pending", "approved", "rejected", "revoked"]
             )
-            + "\nGrant access by ID: /admin grant TELEGRAM_ID",
+            + "\nUse the button below to approve a Telegram user ID.",
             keyboard=keyboard,
         )
         query = select(User).order_by(User.id)
@@ -197,7 +304,7 @@ class Handlers:
 
     async def callback(self, callback):
         if (callback.data or "").startswith(
-            ("library:", "entry:", "archive:", "generate:", "generateall:", "regenerate:", "regen:", "play:", "edit:", "editen:", "replace:", "deleteaudio:", "deleteentry:", "confirmdelete:", "canceldelete:", "privacy:", "discover:", "latest:", "search:", "random:", "publicentry:", "copy:", "playpublic:", "grade:")
+            ("library:", "entry:", "archive:", "generate:", "generateall:", "regenerate:", "regen:", "play:", "edit:", "editen:", "replace:", "deleteaudio:", "deleteentry:", "confirmdelete:", "canceldelete:", "privacy:", "openprivacy:", "discover:", "latest:", "search:", "searchprompt:", "random:", "publicentry:", "copy:", "playpublic:", "grade:", "startpractice:", "resume:", "cancelpractice:", "limitsprompt:", "reminderprompt:", "remindersoff:", "canceledit:", "activity:", "retryop:", "resultop:", "addsentence:", "grantprompt:")
         ):
             user = await self.session.get(User, callback.from_user.id)
             approved = callback.from_user.id == self.settings.admin_telegram_id or (
@@ -236,6 +343,53 @@ class Handlers:
                     answer = "Entry deletion cancelled."
                 elif command == "privacy":
                     answer = await self.change_privacy(value)
+                elif command == "openprivacy":
+                    answer = await self.privacy_menu()
+                elif command == "startpractice":
+                    await self.start_practice(value)
+                    answer = "Practice opened."
+                elif command == "resume":
+                    await self.resume_practice()
+                    answer = "Practice session resumed."
+                elif command == "cancelpractice":
+                    from app.services.reviews import cancel_session
+
+                    cancelled = await cancel_session(self.session, callback.from_user.id)
+                    answer = "Practice session cancelled." if cancelled else "No active practice session."
+                    self.say(answer)
+                elif command == "addsentence":
+                    self.say("Send German text or a voice recording here to add it to your library.")
+                    answer = "Ready for a sentence."
+                elif command == "searchprompt":
+                    self.prompt("🔎 Search public sentences\nReply with a word or phrase (up to 100 characters).", "Search public entries")
+                    answer = "Search prompt opened."
+                elif command == "limitsprompt":
+                    self.prompt("🧮 Practice limits\nReply with: NEW_CARDS_PER_DAY SESSION_SIZE (for example: 20 30).", "20 30")
+                    answer = "Practice limits prompt opened."
+                elif command == "reminderprompt":
+                    self.prompt("⏰ Daily reminder\nReply with HH:MM TIMEZONE (for example: 20:00 Europe/Berlin).", "20:00 Europe/Berlin")
+                    answer = "Reminder prompt opened."
+                elif command == "remindersoff":
+                    user.reminder_enabled = False
+                    self.say("Daily review reminders are off.")
+                    answer = "Daily reminders disabled."
+                elif command == "canceledit":
+                    await self.session.execute(delete(InteractionState).where(InteractionState.user_id == callback.from_user.id))
+                    self.say("Any pending edit or recording replacement was cancelled. The saved entry is unchanged.")
+                    answer = "Pending edit cancelled."
+                elif command == "activity":
+                    await self.activity()
+                    answer = "Activity refreshed."
+                elif command == "retryop":
+                    answer = await self.retry_activity(value)
+                elif command == "resultop":
+                    answer = await self.result_activity(value)
+                elif command == "grantprompt":
+                    if callback.from_user.id == self.settings.admin_telegram_id:
+                        self.prompt("🛡 Grant access by Telegram ID\nReply with the user's numeric Telegram ID.", "Telegram user ID")
+                        answer = "Grant access prompt opened."
+                    else:
+                        answer = "Admin access required."
                 elif command == "discover":
                     answer = await self.discover_menu()
                 elif command == "latest":
@@ -337,6 +491,41 @@ class Handlers:
             user = await self.session.get(User, self.settings.admin_telegram_id)
         text = message.text or ""
         command = text.split(maxsplit=1)
+        navigation = text.strip()
+        if navigation in {
+            "🏠 Home", "Library", "📚 Library", "Test", "🧠 Test", "Discover",
+            "🌍 Discover", "Settings", "⚙️ Settings", "Activity", "📥 Activity", "🛡 Admin",
+        }:
+            if navigation == "🏠 Home":
+                self.home(user)
+            elif navigation in {"Library", "📚 Library"}:
+                self.library_menu()
+            elif navigation in {"Test", "🧠 Test"}:
+                self.test_menu()
+            elif navigation in {"Discover", "🌍 Discover"}:
+                await self.discover_menu()
+            elif navigation in {"Settings", "⚙️ Settings"}:
+                self.settings_menu(user)
+            elif navigation in {"Activity", "📥 Activity"}:
+                await self.activity()
+            else:
+                await self.admin(message)
+            return
+        reply = getattr(message, "reply_to_message", None)
+        reply_text = getattr(reply, "text", "") if reply else ""
+        if reply and reply.from_user and reply.from_user.is_bot and reply_text:
+            if reply_text.startswith("🔎 Search public sentences"):
+                await self.search_public_entries(text)
+                return
+            if reply_text.startswith("🧮 Practice limits"):
+                await self.review_limits(f"/reviewlimits {text}", user)
+                return
+            if reply_text.startswith("⏰ Daily reminder"):
+                await self.reminders(f"/reminders {text}", user)
+                return
+            if reply_text.startswith("🛡 Grant access by Telegram ID"):
+                await self.grant_user(text)
+                return
         if command and command[0] == "/help":
             self.say(
                 "Available commands:\n"
@@ -1028,7 +1217,8 @@ class Handlers:
         keyboard = InlineKeyboardMarkup()
         keyboard.add(InlineKeyboardButton("Latest public entries", callback_data="latest:0"))
         keyboard.add(InlineKeyboardButton("Random public entry", callback_data="random:0"))
-        self.say("Search public entries with /search WORDS.", keyboard=keyboard)
+        keyboard.add(InlineKeyboardButton("Search public entries", callback_data="searchprompt:0"))
+        self.say("<b>Discover</b>\nBrowse, search, or open a random public sentence.", keyboard=keyboard, parse_mode="HTML")
         return "Discovery opened."
 
     def public_results(self, rows, title, page=None, page_command="latest"):
@@ -1342,6 +1532,45 @@ class Handlers:
             self.say("Practice complete. Great work!")
             return "Practice complete."
         return "This review question has expired."
+
+    async def retry_activity(self, value):
+        from uuid import UUID
+
+        from app.services.operations import retry_operation
+
+        try:
+            operation = await retry_operation(self.session, UUID(value), self.incoming.actor_id)
+        except ValueError:
+            operation = None
+        if operation is None:
+            self.say("No failed activity with that ID can be retried.")
+            return "Retry unavailable."
+        if operation.status_message_id:
+            self.say("Retrying your operation.")
+        else:
+            self.status_effect(operation)
+        return "Retry started."
+
+    async def result_activity(self, value):
+        from uuid import UUID
+
+        from app.db.models import Operation
+
+        try:
+            operation = await self.session.get(Operation, UUID(value))
+        except ValueError:
+            operation = None
+        if (
+            operation is None
+            or operation.user_id != self.incoming.actor_id
+            or operation.state != "done"
+        ):
+            self.say("No completed activity with that ID belongs to you.")
+            return "Result unavailable."
+        content = f"German:\n{operation.german or ''}\n\nEnglish:\n{operation.english or ''}"
+        for index in range(0, len(content), 4000):
+            self.say(content[index : index + 4000], key=f"activity_result:{index}")
+        return "Result opened."
 
     def status_effect(self, operation):
         self.say(

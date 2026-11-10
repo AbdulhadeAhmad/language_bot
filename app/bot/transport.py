@@ -8,7 +8,14 @@ from typing import Protocol
 from telebot.apihelper import ApiTelegramException as SyncApiTelegramException
 from telebot.async_telebot import AsyncTeleBot
 from telebot.asyncio_helper import ApiTelegramException, session_manager
-from telebot.types import InlineKeyboardMarkup, InputFile, ReplyParameters
+from telebot.types import (
+    ForceReply,
+    InlineKeyboardMarkup,
+    InputFile,
+    ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
+    ReplyParameters,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +64,15 @@ class BotTransport:
     async def send(self, method: str, payload: dict) -> int | None:
         payload = dict(payload)
         if isinstance(payload.get("reply_markup"), dict):
-            payload["reply_markup"] = InlineKeyboardMarkup.de_json(payload["reply_markup"])
+            markup = payload["reply_markup"]
+            if "inline_keyboard" in markup:
+                payload["reply_markup"] = InlineKeyboardMarkup.de_json(markup)
+            elif "keyboard" in markup:
+                payload["reply_markup"] = ReplyKeyboardMarkup(**markup)
+            elif "remove_keyboard" in markup:
+                payload["reply_markup"] = ReplyKeyboardRemove(**markup)
+            elif "force_reply" in markup:
+                payload["reply_markup"] = ForceReply(**markup)
         if isinstance(payload.get("reply_parameters"), dict):
             payload["reply_parameters"] = ReplyParameters.de_json(payload["reply_parameters"])
         try:
