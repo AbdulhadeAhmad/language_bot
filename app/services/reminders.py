@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from sqlalchemy import func, select
 
 from app.db.models import ReviewCard, Sentence, User
+from app.services.scheduling import ensure_review_cards
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +91,16 @@ class ReminderRunner:
                 return None
             if user.last_reminder_local_date == local_now.date():
                 return None
+
+            sentences = (
+                await session.scalars(
+                    select(Sentence).where(
+                        Sentence.user_id == user_id, Sentence.state == "ready"
+                    )
+                )
+            ).all()
+            for sentence in sentences:
+                await ensure_review_cards(session, sentence, now)
 
             due_count = await session.scalar(
                 select(func.count())
