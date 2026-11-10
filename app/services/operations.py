@@ -6,6 +6,7 @@ from contextlib import suppress
 from datetime import timedelta
 from uuid import uuid4
 
+import httpx
 from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 
@@ -15,6 +16,13 @@ from app.services.collections import DUPLICATE_WARNING, save_capture
 
 logger = logging.getLogger(__name__)
 LEASE_SECONDS = 60
+
+
+def is_transient_model_error(exc):
+    return isinstance(exc, httpx.TransportError) or (
+        isinstance(exc, httpx.HTTPStatusError)
+        and (exc.response.status_code in {408, 429} or exc.response.status_code >= 500)
+    )
 
 
 class StaleOperationClaim(Exception):
@@ -191,8 +199,6 @@ class OperationRunner:
                 await self.render(row, "Processing stopped: access revoked.")
                 await self.finish(row, state="cancelled", error_type="AccessRevoked")
                 return True
-            if row.attempts > 3:
-                raise ValueError("RetryLimit")
             async with asyncio.timeout(self.settings.operation_timeout_seconds):
                 if row.step == "transcribe":
                     await self.render(row, "Transcribing…")
@@ -239,7 +245,10 @@ class OperationRunner:
         except StaleOperationClaim:
             return True
         except Exception as exc:
-            permanent = isinstance(exc, (ValueError, MissingStatusMessage)) or row.attempts >= 3
+            transient_model_error = is_transient_model_error(exc)
+            permanent = isinstance(exc, (ValueError, MissingStatusMessage)) or (
+                row.attempts >= 3 and not transient_model_error
+            )
             state = "failed" if permanent else "pending"
             delay = getattr(exc, "seconds", min(60, 2**row.attempts))
             reset_status = (

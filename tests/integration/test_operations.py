@@ -1,6 +1,7 @@
 import asyncio
 from datetime import timedelta
 
+import httpx
 import pytest
 from sqlalchemy import func, select, update
 
@@ -117,6 +118,24 @@ async def test_network_retry_keeps_successful_previous_stage(db, config):
     async with db.sessions() as session:
         row = await session.scalar(select(Operation))
         assert row.german == "Guten Morgen." and row.step == "translate" and row.state == "pending"
+
+
+async def test_model_disconnect_keeps_operation_recoverable_after_retry_limit(db, config):
+    class Disconnected(FakeModels):
+        async def transcribe(self, operation, transport):
+            raise httpx.ConnectError("model service restarting")
+
+    transport = RecordingTransport()
+    await dispatch(db, config, transport, payload(voice=VOICE))
+    async with db.sessions.begin() as session:
+        row = await session.scalar(select(Operation))
+        row.attempts = 3
+
+    assert await OperationRunner(db, config, transport, Disconnected()).process_one()
+    async with db.sessions() as session:
+        row = await session.scalar(select(Operation))
+        assert row.state == "pending" and row.error_type == "ConnectError"
+        assert row.attempts == 4
 
 
 async def test_long_voice_result_keeps_full_text_and_offers_owner_only_retrieval(db, config):
