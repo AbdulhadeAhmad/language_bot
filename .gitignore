@@ -19,3 +19,16 @@ benchmarks/artifacts/
 .pytest_cache/
 .ruff_cache/
 .coverage
+
+# Production database, audio, and model artifacts must stay outside source control
+*.dump
+*.sql
+*.sqlite
+*.sqlite3
+*.wav
+*.mp3
+*.flac
+*.onnx
+*.safetensors
+*.pt
+*.pth

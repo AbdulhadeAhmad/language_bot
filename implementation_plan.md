@@ -17,8 +17,8 @@ Move each milestone through **Not started → In progress → Verification → D
 | M6 — Editing and deletion | Done | German edits use persisted translation jobs, retain old text until translation succeeds, advance revisions, and requeue previously used voices. English-only edits preserve the German revision/audio. Original and generated-audio replacements are staged; failures preserve the working version and can be retried. Configured voices can be generated individually or all missing voices together. Audio removal and confirmed entry deletion enqueue durable cleanup that deletes archive messages only when no active assets reference them. `/cancel`, duplicate warnings, owner checks, and late-worker fencing are covered. 24 unit and 55 PostgreSQL integration tests pass. Migration `0010_media_cleanup` is deployed; all five Compose services are healthy. |
 | M7 — Privacy, discovery, and copying | Done | Private/public toggles, literal German/English search with page navigation, latest/random discovery, anonymous public details/playback, and independent copies with generated-audio references and immediate-source provenance are implemented. Public access rechecks approval/privacy on each read and copies remain private by default. Verification: 24 unit and 59 PostgreSQL integration tests pass; fresh per-mode copy state passes integration checks. Search and copy behavior are deployed; all five Compose services are healthy at schema `0013_review_limits`. |
 | M8 — Practice and FSRS | Verification | Pinned official `fsrs` package 6.3.1; added JSON-safe scheduling at 90% target retention and persisted per-mode cards/sessions/attempts. All four practice modes are deployed: translation spoilers with four grade buttons; typed dictation/listening with random generated audio, cleared captions, and typed answer reveal. Users can set daily new-card and session-size limits. German edits reset all modes; English edits reset translation/listening while retaining dictation schedules and attempt history. Verification: 34 unit and 70 PostgreSQL integration tests pass; Ruff and `git diff --check` pass. Migrations `0012`/`0013` are deployed; all five Compose services are healthy. Session resume and edit resets are integration-tested. Live Telegram spoiler rendering and anonymous audio playback remain before Done. |
-| M9 — Reminders and recovery | Verification | Opt-in daily reminders are implemented: `/reminders HH:MM TIMEZONE` or `/reminders off`. At the reminder window, missing cards are initialized for legacy saved entries before due reviews are counted. Reminders persist one delivery per local date, skip missed windows after downtime, handle DST transitions, and isolate recipient failures. `/resume` restores the user's persisted active practice question. Production reminder delivery (128 due cards) and API restart without a duplicate reminder are confirmed. Migration `0014_daily_reminders` is deployed; other recovery cases still need acceptance verification. |
-| M10 — Validation and deployment | Not started | |
+| M9 — Reminders and recovery | Done | Opt-in daily reminders are implemented: `/reminders HH:MM TIMEZONE` or `/reminders off`. At the reminder window, missing cards are initialized for legacy saved entries before due reviews are counted. Reminders persist one delivery per local date, skip missed windows after downtime, handle DST transitions, and isolate recipient failures. Production delivery for 128 due cards succeeded. After an API restart, the reminder was not repeated and the owner confirmed `/resume` restored the active practice question. Expired job leases and status reconstruction were reviewed in code. Migration `0014_daily_reminders` is deployed; all five services are healthy. |
+| M10 — Validation and deployment | In progress | Updated the first-release runbook and backup/restore instructions. Read-only Telegram webhook check confirms `https://tglgwh.abdulhade.com/telegram/webhook`, zero pending updates, and no recent webhook errors. Full two-account acceptance and clean-database restore verification remain. |
 
 ## 1. Agreed product behavior
 
@@ -305,7 +305,7 @@ Each milestone closes only when its acceptance checks pass. M1 benchmarking cont
 - Production Compose configuration using the existing HTTPS endpoint.
 - Webhook registration, archive-channel setup instructions, and operational runbook.
 - Manual database backup and restore commands.
-- Full acceptance run using two allowlisted Telegram accounts.
+- Full acceptance run using two Telegram accounts approved through `/admin`.
 
 **Acceptance**
 
@@ -402,6 +402,17 @@ Track each milestone as **Not started → In progress → Verification → Done*
 - Completed the recovery-path review: capture, edit, archive, audio, and deletion jobs persist state and reclaim expired leases; operation progress edits use the persisted Telegram message ID; grade attempts and review-session advancement commit transactionally; `/resume` reconstructs the persisted current review question.
 - Fixed reminders for a selected wall-clock minute that does not exist on the spring-forward date. The scheduler advances to the first valid local minute that day. The local-date guard continues to prevent duplicate sends during the repeated fall-back hour. Invalid timezone inputs longer than the stored field are rejected.
 - Rebuilt and redeployed the API. Python syntax compilation and `git diff --check` pass; all five services are healthy. No automated test suite or live reminder delivery was run; reminders remain opt-in and disabled for existing users. M9 remains In progress pending acceptance verification.
+
+### 2026-11-10 — M9 accepted; M10 release readiness started
+
+- Owner confirmed `/resume` restored the active practice question after the API restart. Combined with the live 128-card reminder delivery and persisted local-date marker, this completes M9's owner acceptance. Marked M9 Done; no automated test suite was run during this acceptance.
+- Started M10 by updating the operations guide for shipped commands, reminder/recovery behavior, current webhook setup, and manual backup/restore steps. Two-account acceptance and a clean-database restore exercise remain.
+
+### 2026-11-10 — M10 runbook and source hygiene
+
+- Replaced stale README and operations text that described editing, discovery, reviews, and TTS as future or unavailable. Documented the shipped review/reminder commands, `/resume`, current HTTPS webhook endpoint, and backup/restore procedure with restrictive dump-file permissions.
+- Read-only Telegram `getWebhookInfo` confirmed `https://tglgwh.abdulhade.com/telegram/webhook`, no pending updates, and no recent delivery errors. The only tracked environment file is `.env.example`; no database dumps or binary audio/model artifacts are tracked. Added ignore rules for local dumps, databases, audio, and model binaries.
+- M10 remains In Progress. A clean-database restore exercise and the full acceptance flow using two owner-approved Telegram accounts are still required; those should use staging data/accounts and the same bot/archive where media playback is checked.
 
 ### 2026-11-03 — M0 complete; M1 benchmark tooling prepared
 

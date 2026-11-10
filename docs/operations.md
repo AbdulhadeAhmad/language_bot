@@ -1,8 +1,14 @@
 # Running the application
 
-The API handles commands and replies directly through AsyncTeleBot. German voice/text capture advances through transcription and translation using private model services, then saves an independent personal entry. The same status message ends with both texts and buttons to open the entry or collection. Archived originals can be played from their saved entry. Opt-in generated German audio is requested from an entry or completed capture. Editing, public discovery, and reviews remain future work.
+The API handles Telegram commands and callbacks. Users can save German text or voice, edit and delete private entries, manage collection privacy, discover and copy public sentences, and practice four review modes. Transcription, translation, and opt-in German speech generation use private model services. Durable workers persist job state and recover expired leases after a restart.
 
-Use `/library` to browse your saved entries, or `/entry ID` to open one. Collections start private. Identical submissions remain separate; matches against your own or public entries produce a small advisory warning. Other users' private entries never trigger warnings. Migration `0004_collections` imports previously completed captures and original Telegram recording references. Back up the database before upgrading, then use the normal image build and Compose startup commands below to apply migrations.
+Use `/help` for the complete command list. `/library` browses saved entries; `/entry ID` opens one. Collections start private. Identical submissions remain separate; matches against your own or public entries produce a small advisory warning. Other users' private entries never trigger warnings. Migrations preserve prior entries and recording references. Back up the database before upgrading, then use the Compose commands below to apply migrations.
+
+## Practice and reminders
+
+`/practice de_to_en`, `/practice en_to_de`, `/practice dictation`, and `/practice listening` start FSRS sessions. An active question and submitted answer are persisted; `/resume` restores the current question after an interruption. Grades and session advancement are committed together, so a repeated or stale callback cannot apply a second grade.
+
+Daily reminders are opt-in. Set a local time and IANA timezone with `/reminders HH:MM TIMEZONE`, for example `/reminders 20:00 Europe/Berlin`; use `/reminders off` to disable them. The scheduler only sends when review cards are due, initializes missing cards for older saved entries, and sends at most one reminder per local date. It skips missed reminder windows after downtime rather than sending a backlog. A spring-forward time that does not exist advances to the first valid local minute; a fall-back repeated minute is fenced by the local-date marker. Reminder delivery failures are isolated per recipient.
 
 ## Original-recording archive (opt-in)
 
@@ -45,7 +51,7 @@ New private `/start` users become pending and produce one channel request. Repea
 docker compose build
 # First run: download the selected, pinned models directly on this server.
 docker compose run --rm prepare-models
-docker compose up -d --remove-orphans
+docker compose up -d --remove-orphans --wait --wait-timeout 180
 curl --fail http://127.0.0.1:8060/health/ready
 docker compose ps
 ```
@@ -65,10 +71,12 @@ location = /telegram/webhook {
 }
 ```
 
-Register the webhook once the HTTPS route works:
+The current production HTTPS endpoint is `https://tglgwh.abdulhade.com/telegram/webhook`, forwarded by the host nginx to `127.0.0.1:8060`. Telegram's `getWebhookInfo` check on 2026-11-10 reported this URL, no pending updates or recent webhook errors, and allowed updates `message` and `callback_query`.
+
+Register or change the webhook only as an explicit operational action after the HTTPS route works:
 
 ```bash
-docker compose exec api python -m app.bot.webhook --url https://YOUR_DOMAIN/telegram/webhook
+docker compose exec api python -m app.bot.webhook --url https://tglgwh.abdulhade.com/telegram/webhook
 ```
 
 Startup never registers or changes a real webhook automatically. Webhook parsing retains the secret check and body-size limit. It processes short native handlers immediately and discards the Telegram update object. `incoming_updates` and `telegram_deliveries` no longer exist.
@@ -85,7 +93,7 @@ Internal HTTP contract (same paths for each service):
 
 - `PUT /jobs/{UUID}`: ASR accepts raw audio bytes (20 MiB maximum); translation accepts JSON `{"text":"..."}` up to 10,000 characters (to cover two-minute transcripts); TTS accepts up to 1,000 characters. A stable ID and identical input return the existing job; different input with that ID returns 409.
 - `GET /jobs/{UUID}`: pending/running/done/failed status and text output or audio availability. Clients await completion by asynchronously polling; HTTP disconnects do not delete work.
-- `GET /jobs/{UUID}/audio`: completed TTS WAV. TTS has no automatic bot call yet.
+- `GET /jobs/{UUID}/audio`: completed TTS WAV. The API requests TTS through this private job interface when an owner asks to generate a voice.
 - `DELETE /jobs/{UUID}`: release completed/failed job input and output artifacts while retaining a result receipt. Active jobs return 409.
 - `GET /health/ready`: database schema and model loaded.
 
@@ -149,16 +157,27 @@ The init script now repairs existing runtime-file ACLs recursively and adds `job
 
 ```bash
 source scripts/env.sh app
+umask 077
+mkdir -p "$LANGUAGE_BOT_DATA_DIR/backups"
 docker compose exec -T db pg_dump -U language_bot -d language_bot -Fc > "$LANGUAGE_BOT_DATA_DIR/backups/database.dump"
+sha256sum "$LANGUAGE_BOT_DATA_DIR/backups/database.dump"
 ```
 
-For a fresh destination, initialize external configuration, start only PostgreSQL, restore the dump, then start the app:
+The `umask` keeps the dump private. Copy it off-host for protection from disk loss. The database includes users, access state, entries, jobs, settings, and FSRS review state; it stores Telegram media references, not audio blobs. Back up `.env` and model files separately. Restored Telegram media references remain usable only with the same bot and archive messages.
+
+For a clean destination, initialize the external data directory and `.env`, then restore the same pinned models under `$LANGUAGE_BOT_DATA_DIR/models/runtime` or download them with the explicit `prepare-models` profile. Restore into the fresh database before starting application services:
 
 ```bash
+source scripts/env.sh app
+bash scripts/init_data.sh
 docker compose up -d db
 # Wait until db is healthy before restoring.
 docker compose exec -T db pg_restore -U language_bot -d language_bot --no-owner < "$LANGUAGE_BOT_DATA_DIR/backups/database.dump"
-docker compose up -d --build
+docker compose up -d --build --remove-orphans --wait --wait-timeout 180
+docker compose exec api alembic check
+docker compose ps
 ```
 
-Back up `.env` and any desired model/benchmark files separately. Keep backups outside this host as well if recovery from disk loss is required. To redeploy from another checkout, use the same absolute data root and standard `docker compose` commands; users, configuration, database, models, and reports survive deletion of the source checkout. `docker compose down` does not remove bind-mounted data. Keep any uncommitted source changes in version control before deleting a checkout.
+For a restore exercise, use a separate data root and bot/database credentials in a staging environment. Confirm the Alembic revision, owner and review counts, and perform a Telegram playback check against the same bot/archive before treating the restore as accepted. To redeploy from another checkout, use the same absolute data root and standard Compose commands; users, configuration, database, models, and reports survive deletion of the source checkout. `docker compose down` does not remove bind-mounted data. Keep uncommitted source changes in version control before deleting a checkout.
+
+For the first-release Telegram acceptance run, use two test accounts approved by the configured administrator with `/admin grant TELEGRAM_ID`. Follow [acceptance_scenarios.md](acceptance_scenarios.md) and record the two-user privacy/isolation results before marking M10 Done.

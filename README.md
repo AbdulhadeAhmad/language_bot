@@ -1,6 +1,6 @@
 # German Learning Telegram Bot
 
-The bot supports registration, admin approval, durable German voice/text processing, and private personal collections. Each completed capture saves a separate entry; accessible duplicate German text produces an advisory warning. Use `/library` to browse your entries and `/entry ID` to open one. Archived originals can be played from their entry. Opt-in German speech generation uses the same private archive and has durable synthesis/upload retries; generation stays disabled until its payload and destination are approved. Commands run directly in the API. Private ASR, translation, and TTS services own PostgreSQL-backed model queues. Editing, discovery, and reviews are upcoming milestones. Progress and decisions are tracked in [implementation_plan.md](implementation_plan.md).
+The bot supports approved-user registration, German voice/text capture, private collections, editing, privacy controls, public discovery and copying, archived audio, and four FSRS practice modes. Use `/help` in Telegram for commands. Daily reminders are opt-in through `/reminders HH:MM TIMEZONE`; `/resume` restores an interrupted practice question. Transcription, translation, and speech generation run through private model services with durable jobs. Progress and decisions are tracked in [implementation_plan.md](implementation_plan.md).
 
 - [Setup, deployment, admin workflow, external storage, and migration](docs/operations.md)
 - [Acceptance scenarios](docs/acceptance_scenarios.md)
