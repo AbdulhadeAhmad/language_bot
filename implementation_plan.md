@@ -414,6 +414,13 @@ Track each milestone as **Not started → In progress → Verification → Done*
 - Read-only Telegram `getWebhookInfo` confirmed `https://tglgwh.abdulhade.com/telegram/webhook`, no pending updates, and no recent delivery errors. The only tracked environment file is `.env.example`; no database dumps or binary audio/model artifacts are tracked. Added ignore rules for local dumps, databases, audio, and model binaries.
 - M10 remains In Progress. A clean-database restore exercise and the full acceptance flow using two owner-approved Telegram accounts are still required; those should use staging data/accounts and the same bot/archive where media playback is checked.
 
+### 2026-11-10 — M10 clean restore and automated verification
+
+- Created a 61 KB mode-0600 snapshot at `/home/sup/language_bot_data/backups/m10-restore-check-20261110.dump` (SHA-256 `32062191b12728437461047ad5d5e283d6126673770f94491a9de44ee53c1e29`). Restored it into an isolated disposable PostgreSQL container without changing production data.
+- The restored database reports revision `0014_daily_reminders`, 2 users, 32 sentences, 128 review cards, and 0 review attempts. Alembic reports no schema differences against the restored copy.
+- Unit suite: 34 passed. PostgreSQL integration suite: 70 passed after fixing a backward-compatibility issue where `MissingStatusMessage()` no longer accepted an empty constructor. Ruff lint passed. A repository-wide Ruff formatting check reports 25 files would be reformatted; no broad format-only rewrite was applied.
+- Rebuilt and redeployed the API with the compatibility fix; all five Compose services are healthy. M10 remains In Progress pending Telegram acceptance with two approved accounts. M8 spoiler rendering and review-audio acceptance also remain open.
+
 ### 2026-11-03 — M0 complete; M1 benchmark tooling prepared
 
 - Added `docs/acceptance_scenarios.md` with 30 observable scenarios mapped to milestones; reviewed them against the current ownership, duplicate-warning, provenance, privacy, and spoiler-flashcard rules.

@@ -36,7 +36,7 @@ class RetryAfter(Exception):
 class RejectedDelivery(Exception):
     """Telegram explicitly rejected the operation."""
 
-    def __init__(self, message, *, telegram_error_code=None):
+    def __init__(self, message="Telegram rejected the delivery", *, telegram_error_code=None):
         super().__init__(message)
         self.telegram_error_code = telegram_error_code
 
