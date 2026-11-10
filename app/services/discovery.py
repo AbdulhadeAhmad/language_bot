@@ -59,7 +59,7 @@ async def set_privacy(session, user_id, *, private):
     return user.private
 
 
-async def copy_public_sentence(session, user_id, sentence_id):
+async def copy_public_sentence(session, user_id, sentence_id, settings=None):
     source_owner_id = await session.scalar(
         select(Sentence.user_id).where(Sentence.id == sentence_id)
     )
@@ -125,4 +125,8 @@ async def copy_public_sentence(session, user_id, sentence_id):
             id=uuid4(), sentence_id=sentence.id, stored_media_id=media.id,
             voice_id=asset.voice_id, kind="generated", state="ready", active=True,
         ))
+    if settings is not None:
+        from app.services.audio import enqueue_missing_voice_audio
+
+        await enqueue_missing_voice_audio(session, settings, sentence)
     return sentence

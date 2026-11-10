@@ -48,7 +48,7 @@ async def list_sentences(session, user_id, page=0, page_size=5):
     ).all()
 
 
-async def save_capture(session, claimed):
+async def save_capture(session, claimed, settings=None):
     # Serialize against lease recovery and completion retries before creating any entry.
     operation = await session.scalar(
         select(Operation)
@@ -67,6 +67,10 @@ async def save_capture(session, claimed):
     )
     if sentence is not None:
         sentence.status_message_id = operation.status_message_id
+        if settings is not None:
+            from app.services.audio import enqueue_missing_voice_audio
+
+            await enqueue_missing_voice_audio(session, settings, sentence)
         return sentence
     sentence = Sentence(
         id=uuid4(),
@@ -101,4 +105,8 @@ async def save_capture(session, claimed):
                 source_message_id=operation.source_message_id,
             )
         )
+    if settings is not None:
+        from app.services.audio import enqueue_missing_voice_audio
+
+        await enqueue_missing_voice_audio(session, settings, sentence)
     return sentence

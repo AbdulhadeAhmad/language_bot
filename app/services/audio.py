@@ -14,9 +14,10 @@ from sqlalchemy import and_, func, or_, select, update
 from app.bot.transport import RejectedDelivery, RetryAfter
 from app.db.models import AudioAsset, AudioJob, Sentence, StoredMedia, User, Voice
 from app.services.archive import copy_payload
+from app.voice_catalog import DEFAULT_VOICE_ID, VOICE_CATALOG, voice_name
 
 logger = logging.getLogger(__name__)
-DEFAULT_VOICE = "de_DE-thorsten-medium"
+DEFAULT_VOICE = DEFAULT_VOICE_ID
 
 
 def clip_telegram_text(text, limit):
@@ -27,19 +28,30 @@ def clip_telegram_text(text, limit):
 
 
 def archive_audio_metadata(sentence, asset, voice):
-    voice_name = voice.id.split("-", 1)[-1].replace("-", " ").replace("_", " ").title()
+    name = voice_name(voice.id)
 
     def tag(value):
         return "#" + re.sub(r"\W+", "_", str(value))
 
     fields = [
-        ("Voice", f"{voice_name} {tag(voice.id)}"),
+        ("Voice", f"{name} {tag(voice.id)}"),
         ("Provider", tag(voice.provider)),
         ("Sentence", tag(f"sentence_{sentence.id.hex}")),
         ("User", tag(f"user_{sentence.user_id}")),
         ("Audio", tag(f"audio_{asset.id.hex}")),
         ("Revision", tag(f"revision_{sentence.revision}")),
     ]
+    attribution = next(
+        (
+            configured_voice["dataset_attribution"]
+            for configured_voice in VOICE_CATALOG
+            if configured_voice["id"] == voice.id
+            and configured_voice.get("dataset_attribution")
+        ),
+        None,
+    )
+    if attribution:
+        fields.append(("Voice dataset", f"{attribution} {tag(attribution)}"))
     footer_plain = "\n\n" + "\n".join(f"{label}: {value}" for label, value in fields)
     overhead = "German\n\n\nEnglish\n" + footer_plain
     remaining = 1024 - len(overhead.encode("utf-16-le")) // 2
@@ -60,7 +72,7 @@ def archive_audio_metadata(sentence, asset, voice):
         ),
         "parse_mode": "HTML",
         "title": title,
-        "performer": clip_telegram_text(voice_name, 64),
+        "performer": clip_telegram_text(name, 64),
         "file_name": f"{filename}.mp3",
     }
 
@@ -156,6 +168,28 @@ async def request_audio(
         job.claim_token, job.lease_until, job.available_at = None, None, func.now()
         asset.state = "generating" if job.step == "synthesize" else "saving"
     return asset
+
+
+async def enqueue_missing_voice_audio(session, settings, sentence):
+    """Queue every missing configured voice for a newly saved or copied sentence."""
+    if not settings.telegram_tts_enabled:
+        return 0
+    voices = (await session.scalars(select(Voice).order_by(Voice.id))).all()
+    queued = 0
+    for voice in voices:
+        existing = await generated_audio(session, sentence.user_id, sentence.id, voice.id)
+        job = await session.get(AudioJob, existing.id) if existing else None
+        if existing and existing.state == "ready" and job and job.sentence_revision == sentence.revision:
+            continue
+        # Do not automatically repeat an upload whose Telegram result was ambiguous.
+        if job and job.state == "failed" and job.step == "upload" and job.uncertain:
+            continue
+        asset = await request_audio(
+            session, settings, sentence.user_id, sentence.id, voice.id
+        )
+        if asset is not None and asset.state != "ready":
+            queued += 1
+    return queued
 
 
 async def playback_payload(session, user_id, asset_id):
@@ -375,7 +409,7 @@ class AudioRunner:
                 raise ValueError("AudioRetryLimit")
             async with asyncio.timeout(self.settings.operation_timeout_seconds):
                 if job.step == "synthesize":
-                    await self.models.synthesize(job, sentence.german)
+                    await self.models.synthesize(job, sentence.german, asset.voice_id)
                     await self.finish(job, state="pending", step="upload")
                 else:
                     audio = await self.models.speech_audio(job)

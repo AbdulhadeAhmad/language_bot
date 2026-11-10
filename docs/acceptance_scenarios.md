@@ -61,5 +61,5 @@ M0 is complete when these scenarios and the implementation plan agree. Later mil
 - Transcription and translation update the same message, ending with German and English only. Other commands remain responsive during inference.
 - Restarting the API resumes pending steps; restarting a model service recovers its expired lease. Late results from old claim tokens cannot overwrite current results.
 - Model APIs accept stable job IDs, return existing results for identical retries, reject conflicting inputs, and apply bounded admission using PostgreSQL.
-- Model ports are not published; services join only the internal Docker network. TTS retains its WAV API and offers an MP3 response for Telegram. Generated-audio integration is disabled until its payload/destination approval; once enabled it runs only for an owner's explicit Generate German audio action.
+- Model ports are not published; services join only the internal Docker network. TTS retains its WAV API and offers an MP3 response for Telegram. When enabled, capture and copy automatically queue all missing configured German voices; existing entries are backfilled through the one-shot command.
 - Upgrading removes the raw inbox/outbox while preserving user approvals, access audit records, and known approval-message IDs.

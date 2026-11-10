@@ -2,6 +2,8 @@
 
 import wave
 
+from app.voice_catalog import DEFAULT_VOICE_ID, VOICE_MODEL_FILES
+
 
 def speech_chunks(text, limit=1000):
     text = " ".join(text.split())
@@ -103,9 +105,16 @@ def load(kind, model_dir, threads):
     if kind == "tts":
         from piper import PiperVoice
 
-        model = PiperVoice.load(str(model_dir / "tts/de_DE-thorsten-medium.onnx"), use_cuda=False)
+        models = {
+            voice_id: PiperVoice.load(str(model_dir / "tts" / filename), use_cuda=False)
+            for voice_id, filename in VOICE_MODEL_FILES.items()
+        }
 
         def infer(job, output):
+            voice_id = job.voice_id or DEFAULT_VOICE_ID
+            model = models.get(voice_id)
+            if model is None:
+                raise ValueError("UnknownVoice")
             with wave.open(str(output), "wb") as stream:
                 for index, chunk in enumerate(speech_chunks(job.input_text)):
                     model.synthesize_wav(chunk, stream, set_wav_format=index == 0)

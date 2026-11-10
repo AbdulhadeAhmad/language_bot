@@ -29,7 +29,7 @@ class SpeechModels:
         self.generated, self.discarded = [], []
         self.synthesis_error = self.audio_error = None
 
-    async def synthesize(self, job, german):
+    async def synthesize(self, job, german, voice_id=None):
         self.generated.append((job.asset_id, job.generation, german))
         if self.synthesis_error:
             raise self.synthesis_error

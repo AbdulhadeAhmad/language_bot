@@ -9,11 +9,11 @@ Move each milestone through **Not started → In progress → Verification → D
 | Milestone | Status | Evidence / notes |
 |---|---|---|
 | M0 — Specification and tracking | Done | [30 acceptance scenarios](docs/acceptance_scenarios.md) cover ownership, duplicates, privacy, copying, editing, deletion, and review behavior; checked against the revised specification. |
-| M1 — Runtime and model feasibility | In progress | [First server-run findings](docs/benchmark_findings_20261103.md): translation and three TTS voices completed. ASR rerun passed; [second-run findings](docs/benchmark_findings_20261104.md) compare accuracy and expanded TTS performance. [Round-two commands](benchmarks/README.md) compare six Piper variants and three Qwen3-TTS 0.6B speakers over 27 inputs. Quality, license review, and final selection remain pending. |
+| M1 — Runtime and model feasibility | Done | [First server-run findings](docs/benchmark_findings_20261103.md): translation and three TTS voices completed. ASR rerun passed; [second-run findings](docs/benchmark_findings_20261104.md) compare accuracy and expanded TTS performance. [Round-two commands](benchmarks/README.md) compare six Piper variants and three Qwen3-TTS 0.6B speakers over 27 inputs. Owner accepted the current models' quality and selected Thorsten medium, Eva K. x-low, and Karlsson low for the deployed three-voice set; all voices load and the TTS service is healthy. |
 | M2 — Async application foundation | Done | Owner accepted completion on 2026-11-05 after successfully testing live transcription and translation. Current deployment and model smoke checks passed; fresh-deployment/recreation checks for the latest refactor were not rerun. [Operations](docs/operations.md). |
 | M3 — Collections and duplicate warnings | Done | Personal sentence/media/voice schema, completed-capture migration, `/library` pagination, owner-only entry controls, normalized non-unique lookup, and private-safe advisory warnings implemented. 14 unit and 33 PostgreSQL integration tests pass, including concurrency, redelivery/retry idempotency, ownership, privacy, and migration preservation/rollback. Current deployment verified healthy with schema and collection smoke checks. |
 | M4 — Durable jobs and archive storage | Done | Archive queue, migration/backfill, server-side media adapter, leases/heartbeats, bounded retries, orphan logging, and owner-only retry controls implemented. 17 unit and 40 PostgreSQL integration tests pass. Owner explicitly approved and activated copying to the configured private channel; 4 live recordings archived successfully in one attempt each, with no duplicate assets/receipts. All services healthy and deployed schema matches code. |
-| M5 — Voice and text capture | Done | Capture/library/archive flow, original playback, and on-demand Thorsten speech generation deployed healthy. 22 unit and 48 PostgreSQL integration tests pass. Owner explicitly approved generated-audio activation; live synthesis, MP3 archive upload/read-back, owner playback controls, and model-file cleanup verified. Multi-user/discovery behavior will be extended at M7. |
+| M5 — Voice and text capture | Done | Capture/library/archive flow, original playback, and automatic three-voice generation for new captures and copied sentences are deployed healthy. Existing records are being backfilled through durable audio jobs; the command reported 37 eligible entries, 90 queued/resumed jobs, and one ambiguous upload skipped to avoid a possible duplicate. Earlier live synthesis, MP3 archive upload/read-back, owner playback controls, and model-file cleanup were verified. Multi-user/discovery behavior was extended at M7. |
 | M6 — Editing and deletion | Done | German edits use persisted translation jobs, retain old text until translation succeeds, advance revisions, and requeue previously used voices. English-only edits preserve the German revision/audio. Original and generated-audio replacements are staged; failures preserve the working version and can be retried. Configured voices can be generated individually or all missing voices together. Audio removal and confirmed entry deletion enqueue durable cleanup that deletes archive messages only when no active assets reference them. `/cancel`, duplicate warnings, owner checks, and late-worker fencing are covered. 24 unit and 55 PostgreSQL integration tests pass. Migration `0010_media_cleanup` is deployed; all five Compose services are healthy. |
 | M7 — Privacy, discovery, and copying | Done | Private/public toggles, literal German/English search with page navigation, latest/random discovery, anonymous public details/playback, and independent copies with generated-audio references and immediate-source provenance are implemented. Public access rechecks approval/privacy on each read and copies remain private by default. Verification: 24 unit and 59 PostgreSQL integration tests pass; fresh per-mode copy state passes integration checks. Search and copy behavior are deployed; all five Compose services are healthy at schema `0013_review_limits`. |
 | M8 — Practice and FSRS | Done | Pinned official `fsrs` package 6.3.1; added JSON-safe scheduling at 90% target retention and persisted per-mode cards/sessions/attempts. All four practice modes are deployed: translation spoilers with four grade buttons; typed dictation/listening with random generated audio, cleared captions, and typed answer reveal. Users can set daily new-card and session-size limits. German edits reset all modes; English edits reset translation/listening while retaining dictation schedules and attempt history. Verification: 34 unit and 70 PostgreSQL integration tests pass; Ruff and `git diff --check` pass. Migrations `0012`/`0013` are deployed; all five Compose services are healthy. Session resume and edit resets are integration-tested. Owner confirmed live spoiler rendering and anonymous audio playback in Telegram on 2026-11-10. |
@@ -124,7 +124,7 @@ Each milestone closes only when its acceptance checks pass. M1 benchmarking cont
 - Examples cover two users saving the same German, copying, editing, switching privacy, and deleting.
 - No unresolved ownership or privacy behavior remains in those examples.
 
-### [ ] M1 — Verify runtime and local model feasibility
+### [x] M1 — Verify runtime and local model feasibility
 
 **Deliverables**
 
@@ -138,7 +138,7 @@ Each milestone closes only when its acceptance checks pass. M1 benchmarking cont
 - A representative German sample set completes ASR, translation, and all three voices.
 - A two-minute voice recording and 1,000-character text complete without out-of-memory failures.
 - Leave memory headroom for PostgreSQL and the application; initially budget at most 10 GB for model inference.
-- The project owner listens to the voice samples and accepts transcription/translation quality.
+- The project owner accepts the current models' quality and requests three generated voices.
 - If no candidate meets the hardware or quality requirements, resolve that constraint before proceeding.
 
 ### [x] M2 — Establish the async application foundation
@@ -199,14 +199,14 @@ Each milestone closes only when its acceptance checks pass. M1 benchmarking cont
 **Deliverables**
 
 - Current voice flow: transcribe → translate → save personal entry and show both texts in the original status message with accessible duplicate warnings. Original recording archive jobs copy to the approved private storage channel independently of translation.
-- Current text flow: translate → save personal entry and show both texts. On-demand German audio generation and archived playback are active following owner approval of generated-audio storage.
+- Current text flow: translate → save personal entry and show both texts. All three configured German voices generate automatically and are archived after each new sentence is saved or copied. Existing eligible sentences are backfilled through durable jobs.
 - One editable processing-status message with management controls.
 - Step-specific failure information and retry actions.
 - Maximum input length/duration enforcement.
 
 **Acceptance**
 
-- Both input types produce persisted German/English operation results and one updated status message. Generated audio is optional and requested separately from the saved entry or completed capture.
+- Both input types produce persisted German/English operation results and one updated status message. All three voice jobs are enqueued automatically after save; playback reuses archived audio references.
 - Voice entries also retain their original recording.
 - Playback reuses Telegram references.
 - A failed step does not discard successful earlier results.
@@ -602,3 +602,11 @@ Track each milestone as **Not started → In progress → Verification → Done*
 - Updated six older generated archive posts in place, including their filenames/titles, preserving message IDs and active asset references. Their existing MP3 bytes were reused without TTS regeneration; stored file references were updated from Telegram's returned messages.
 - Verified a fresh end-to-end upload after the cache fix: archive message 15 returned the exact expected caption, hashtags, title, and filename on initial send. Its structured metadata-confirmation event reports all checks true. No manual caption repair was needed for this fresh post.
 - Verification: 24 unit and 48 PostgreSQL integration tests pass, including HTML escaping, long multilingual/Unicode captions, metadata on the worker upload path, sentence-based filenames, and caption-free owner playback. Docker source/install consistency checks pass. All services are healthy.
+
+### 2026-11-10 — Automatic three-voice generation and existing-entry backfill
+
+- Owner accepted the current model quality and requested three voices per sentence, generated automatically after new captures and copied public sentences, plus a backfill for older entries.
+- Added Eva K. (`de_DE-eva_k-x_low`) and Karlsson (`de_DE-karlsson-low`) alongside Thorsten (`de_DE-thorsten-medium`). Piper model files and attribution cards are loaded by the TTS worker; archive captions identify the voice and M-AILABS dataset for the added voices.
+- Added persisted voice identity to model jobs, migration `0015_multi_voice_tts`, and a one-shot `language-bot-backfill-tts` command. Existing ready assets are preserved; uncertain prior uploads are skipped rather than risking duplicate channel posts.
+- Deployed with the API briefly paused during migration. Migration `0015_multi_voice_tts` is current, all three voice rows are present, and API/TTS are healthy. Backfill found 37 eligible entries, 20 ready voice assets, queued or resumed 90 jobs, and skipped one ambiguous upload.
+- At the time of this entry, the durable backfill worker is processing the queued jobs. Do not mark historical generation complete until the audio queue drains and ready assets are checked for all three voices.

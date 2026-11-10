@@ -182,10 +182,6 @@ class OperationRunner:
                     ]
                 ]
             }
-            if self.settings.telegram_tts_enabled:
-                payload["reply_markup"]["inline_keyboard"].append(
-                    [{"text": "Generate German audio", "callback_data": f"generate:{sentence_id}"}]
-                )
         async with asyncio.timeout(self.settings.telegram_timeout_seconds):
             await self.transport.send("edit_message_text", payload)
 
@@ -230,7 +226,7 @@ class OperationRunner:
                     )
                 else:
                     async with self.database.sessions.begin() as session:
-                        sentence = await save_capture(session, row)
+                        sentence = await save_capture(session, row, self.settings)
                     if sentence is None:
                         return True
                     result = f"German:\n{row.german}\n\nEnglish:\n{row.english}"
@@ -240,6 +236,8 @@ class OperationRunner:
                         result = f"German:\n{german}\n\nEnglish:\n{english}\n\nFull text: /result {row.id}"
                     if sentence.duplicate_warning:
                         result += f"\n\n{DUPLICATE_WARNING}"
+                    if self.settings.telegram_tts_enabled:
+                        result += "\n\nGerman audio is being generated automatically in all available voices."
                     await self.render(row, result, sentence.id)
                     await self.finish(row, state="done", error_type=None)
         except StaleOperationClaim:

@@ -7,6 +7,7 @@ from telebot.async_telebot import AsyncTeleBot
 from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from app.db.models import AccessChange, InteractionState, Sentence, User
+from app.voice_catalog import voice_name as display_voice_name
 
 
 class PropagateErrors:
@@ -735,7 +736,7 @@ class Handlers:
                 self.session, self.incoming.actor_id, row.id, voice.id
             )
             staged = await staged_generated_audio(self.session, row.id, voice.id)
-            voice_name = voice.id.split("-", 1)[-1].replace("-", " ").replace("_", " ").title()
+            voice_name = display_voice_name(voice.id)
             if staged:
                 result += f"\n\n{voice_name} replacement audio: {staged.state}."
                 if staged.state == "failed":
@@ -1110,7 +1111,7 @@ class Handlers:
                 label = "Play original recording"
             else:
                 voice = await self.session.get(Voice, asset.voice_id)
-                name = voice.id.split("-", 1)[-1].replace("-", " ").replace("_", " ").title() if voice else "German voice"
+                name = display_voice_name(voice.id) if voice else "German voice"
                 label = f"Play {name}"
             keyboard.add(InlineKeyboardButton(label, callback_data=f"playpublic:{asset.id}"))
         keyboard.add(InlineKeyboardButton("Copy to my collection", callback_data=f"copy:{sentence.id}"))
@@ -1127,13 +1128,16 @@ class Handlers:
             sentence_id = UUID(value)
         except ValueError:
             return "Entry unavailable."
-        copied = await copy_public_sentence(self.session, self.incoming.actor_id, sentence_id)
+        copied = await copy_public_sentence(
+            self.session, self.incoming.actor_id, sentence_id, self.settings
+        )
         if copied is None:
             return "Entry is no longer public."
         keyboard = InlineKeyboardMarkup()
         keyboard.add(InlineKeyboardButton("Open copied entry", callback_data=f"entry:{copied.id}"))
         self.say(
             "Copied to your private collection."
+            + (" Any missing German voice audio will be generated automatically." if self.settings.telegram_tts_enabled else "")
             + (" Similar German text exists in your collection or public collections." if copied.duplicate_warning else ""),
             keyboard=keyboard,
         )

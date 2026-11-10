@@ -367,6 +367,7 @@ class ModelJob(Base):
     fingerprint: Mapped[str] = mapped_column(String(64))
     input_text: Mapped[str | None] = mapped_column(String)
     input_path: Mapped[str | None] = mapped_column(String)
+    voice_id: Mapped[str | None] = mapped_column(String(100))
     output_text: Mapped[str | None] = mapped_column(String)
     output_path: Mapped[str | None] = mapped_column(String)
     state: Mapped[str] = mapped_column(String(16), server_default="pending")

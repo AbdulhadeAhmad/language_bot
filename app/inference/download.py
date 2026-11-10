@@ -10,6 +10,8 @@ from pathlib import Path
 import requests
 from huggingface_hub import hf_hub_download, snapshot_download
 
+from app.voice_catalog import VOICE_CATALOG
+
 
 def download_with_retry(function, *args, **kwargs):
     for attempt in range(3):
@@ -45,6 +47,7 @@ def main():
         "tts": {
             "repository": "rhasspy/piper-voices",
             "revision": "e7229f7d33a10e145e109b886d661984201ac3c4",
+            "voices": [voice["id"] for voice in VOICE_CATALOG],
         },
     }
     for name in ("asr", "translation"):
@@ -65,12 +68,19 @@ def main():
         model = models["tts"]
         directory = root / "tts"
         directory.mkdir(exist_ok=True)
-        prefix = "de/de_DE/thorsten/medium/"
-        for name in ("de_DE-thorsten-medium.onnx", "de_DE-thorsten-medium.onnx.json", "MODEL_CARD"):
-            source = download_with_retry(
-                hf_hub_download, model["repository"], prefix + name, revision=model["revision"]
-            )
-            shutil.copyfile(source, directory / name)
+        for voice in VOICE_CATALOG:
+            for name in (voice["model"], f"{voice['id']}.onnx.json", "MODEL_CARD"):
+                source = download_with_retry(
+                    hf_hub_download,
+                    model["repository"],
+                    f"{voice['repository_path']}/{name}",
+                    revision=model["revision"],
+                )
+                if name == "MODEL_CARD":
+                    destination = directory / f"{voice['id']}.MODEL_CARD"
+                else:
+                    destination = directory / name
+                shutil.copyfile(source, destination)
     for name in args.only:
         (root / name / "runtime-provenance.json").write_text(
             json.dumps(models[name], indent=2) + "\n"

@@ -20,6 +20,7 @@ from app.db.models import ModelJob
 from app.db.session import Database
 from app.inference.runtime import encode_mp3, load
 from app.paths import data_root
+from app.voice_catalog import DEFAULT_VOICE_ID, VOICE_MODEL_FILES
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,7 @@ class ModelSettings(BaseSettings):
 
 class TextInput(BaseModel):
     text: str = Field(min_length=1, max_length=10000)
+    voice_id: str | None = Field(default=None, max_length=100)
 
 
 class ModelQueue:
@@ -226,17 +228,26 @@ def create_app(settings=None, database=None, infer=None, run_worker=True):
             if len(body) > limit:
                 raise HTTPException(413, "Input too large")
         input_text = None
+        voice_id = None
         if settings.model_kind != "asr":
             try:
-                input_text = TextInput.model_validate_json(body).text.strip()
+                text_input = TextInput.model_validate_json(body)
+                input_text = text_input.text.strip()
                 if not input_text:
                     raise ValueError()
             except ValueError:
                 raise HTTPException(422, "Expected non-empty text within service limits") from None
+            if settings.model_kind == "tts":
+                voice_id = text_input.voice_id or DEFAULT_VOICE_ID
+                if voice_id not in VOICE_MODEL_FILES:
+                    raise HTTPException(422, "Unknown TTS voice")
         elif not body:
             raise HTTPException(422, "Audio required")
+        fingerprint_input = input_text.encode() if input_text is not None else body
+        if voice_id and voice_id != DEFAULT_VOICE_ID:
+            fingerprint_input = f"{voice_id}\0{input_text}".encode()
         fingerprint = hashlib.sha256(
-            body if input_text is None else input_text.encode()
+            fingerprint_input
         ).hexdigest()
         async with database.sessions.begin() as session:
             # Serialize admission only, so the persistent queue limit cannot be overrun.
@@ -272,6 +283,7 @@ def create_app(settings=None, database=None, infer=None, run_worker=True):
                     fingerprint=fingerprint,
                     input_text=input_text,
                     input_path=input_path,
+                    voice_id=voice_id,
                 )
             )
         return {"id": str(job_id), "state": "pending"}

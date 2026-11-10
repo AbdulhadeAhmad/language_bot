@@ -23,6 +23,7 @@ dev = ["pytest>=8,<9", "pytest-asyncio>=1,<2", "httpx>=0.28,<1", "ruff>=0.11,<1"
 [project.scripts]
 language-bot-api = "app.main:run"
 language-bot-model = "app.inference.main:run"
+language-bot-backfill-tts = "app.backfill_audio:run"
 
 [build-system]
 requires = ["hatchling"]

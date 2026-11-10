@@ -5,20 +5,25 @@ from uuid import uuid5
 
 import httpx
 
+from app.voice_catalog import DEFAULT_VOICE_ID
+
 
 class ModelClient:
     def __init__(self, settings, client=None):
         self.settings = settings
         self.client = client or httpx.AsyncClient(timeout=30)
 
-    async def run(self, kind, job_id, *, audio=None, text=None):
+    async def run(self, kind, job_id, *, audio=None, text=None, voice_id=None):
         url = getattr(self.settings, f"{kind}_url").rstrip("/") + f"/jobs/{job_id}"
+        payload = {"text": text}
+        if voice_id:
+            payload["voice_id"] = voice_id
         response = (
             await self.client.put(
                 url, content=audio, headers={"Content-Type": "application/octet-stream"}
             )
             if audio is not None
-            else await self.client.put(url, json={"text": text})
+            else await self.client.put(url, json=payload)
         )
         response.raise_for_status()
         return await self.wait(url)
@@ -55,8 +60,8 @@ class ModelClient:
     def speech_id(job):
         return uuid5(job.asset_id, f"tts:{job.generation}")
 
-    async def synthesize(self, job, german):
-        return await self.run("tts", self.speech_id(job), text=german)
+    async def synthesize(self, job, german, voice_id=DEFAULT_VOICE_ID):
+        return await self.run("tts", self.speech_id(job), text=german, voice_id=voice_id)
 
     async def speech_audio(self, job):
         url = self.settings.tts_url.rstrip("/") + f"/jobs/{self.speech_id(job)}/audio?format=mp3"
