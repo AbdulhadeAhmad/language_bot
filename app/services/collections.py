@@ -1,9 +1,14 @@
 """Personal collections and advisory duplicate checks, scoped at the query boundary."""
 
+import base64
+import binascii
+import hashlib
+import re
 import unicodedata
+from datetime import datetime, timedelta, timezone
 
-from app.core.idgen import generate_id
-from sqlalchemy import or_, select
+from app.core.idgen import generate_id, normalize_id
+from sqlalchemy import and_, or_, select
 
 from app.db.models import ArchiveJob, AudioAsset, Operation, Sentence, StoredMedia, User
 from app.services.scheduling import ensure_review_cards
@@ -48,21 +53,66 @@ async def list_sentences(session, user_id, page=0, page_size=5):
     ).all()
 
 
-async def search_library(session, user_id, language, query, *, limit=20):
-    """Search one owner's library with a bounded substring query, newest first."""
+def _library_cursor_fingerprint(language, term):
+    return hashlib.blake2s(f"{language}\0{term.casefold()}".encode(), digest_size=6).hexdigest()
+
+
+def _encode_library_cursor(sentence, fingerprint):
+    created = sentence.created_at.astimezone(timezone.utc)
+    delta = created - datetime(1970, 1, 1, tzinfo=timezone.utc)
+    micros = (delta.days * 86400 + delta.seconds) * 1_000_000 + delta.microseconds
+    value = f"{fingerprint}:{micros}:{sentence.id}".encode()
+    return base64.urlsafe_b64encode(value).decode().rstrip("=")
+
+
+def _decode_library_cursor(value, fingerprint):
+    if not value or len(value) > 64 or not re.fullmatch(r"[A-Za-z0-9_-]+", value):
+        return None
+    try:
+        raw = base64.urlsafe_b64decode(value + "=" * (-len(value) % 4)).decode()
+        stored_fingerprint, raw_micros, sentence_id = raw.split(":", 2)
+        if stored_fingerprint != fingerprint:
+            return None
+        sentence_id = normalize_id(sentence_id)
+        micros = int(raw_micros)
+        if micros < 0:
+            return None
+        created = datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(microseconds=micros)
+        return created, sentence_id
+    except (ValueError, OverflowError, UnicodeDecodeError, binascii.Error):
+        return None
+
+
+async def search_library(session, user_id, language, query, *, offset="", limit=20):
+    """Search one owner's library newest-first using a stable, bounded keyset cursor."""
     column = {"de": Sentence.german, "en": Sentence.english}.get(language)
     term = " ".join(query.split())[:100]
     if column is None:
-        return []
+        return [], None
+    limit = min(max(int(limit), 1), 20)
+    fingerprint = _library_cursor_fingerprint(language, term)
+    cursor = _decode_library_cursor(offset, fingerprint)
     query_stmt = select(Sentence).where(Sentence.user_id == user_id)
     if term:
         escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         query_stmt = query_stmt.where(column.ilike(f"%{escaped}%", escape="\\"))
-    return (
+    if cursor:
+        created, sentence_id = cursor
+        query_stmt = query_stmt.where(
+            or_(
+                Sentence.created_at < created,
+                and_(Sentence.created_at == created, Sentence.id < sentence_id),
+            )
+        )
+    rows = (
         await session.scalars(
-            query_stmt.order_by(Sentence.created_at.desc(), Sentence.id.desc()).limit(limit)
+            query_stmt.order_by(Sentence.created_at.desc(), Sentence.id.desc()).limit(limit + 1)
         )
     ).all()
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    next_offset = _encode_library_cursor(rows[-1], fingerprint) if has_more and rows else None
+    return rows, next_offset
 
 
 async def save_capture(session, claimed, settings=None):

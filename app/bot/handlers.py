@@ -177,7 +177,13 @@ class Handlers:
         if approved and language:
             from app.services.collections import search_library
 
-            rows = await search_library(self.session, inline_query.from_user.id, language, term)
+            rows, next_offset = await search_library(
+                self.session,
+                inline_query.from_user.id,
+                language,
+                term,
+                offset=inline_query.offset or "",
+            )
             for row in rows:
                 german = " ".join(row.german.split())
                 english = " ".join(row.english.split())
@@ -199,6 +205,7 @@ class Handlers:
                 "results": results,
                 "cache_time": 0,
                 "is_personal": True,
+                "next_offset": next_offset if approved and language else None,
             },
         )
 
