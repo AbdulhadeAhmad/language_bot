@@ -1,18 +1,18 @@
 import json
-from html import escape
 from datetime import UTC, datetime
+from html import escape
 
 from app.core.idgen import find_typed_ids, format_id, generate_id, normalize_id
-from sqlalchemy import delete, func, select
+from sqlalchemy import case, delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from telebot.async_telebot import AsyncTeleBot
 from telebot.types import (
     ForceReply,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    ReplyKeyboardMarkup,
     InlineQueryResultArticle,
     InputTextMessageContent,
+    ReplyKeyboardMarkup,
 )
 
 from app.db.models import AccessChange, InteractionState, Sentence, User
@@ -396,7 +396,7 @@ class Handlers:
 
     async def callback(self, callback):
         if (callback.data or "").startswith(
-            ("library:", "entry:", "archive:", "generate:", "generateall:", "regenerate:", "regen:", "play:", "edit:", "editen:", "replace:", "deleteaudio:", "deleteentry:", "confirmdelete:", "canceldelete:", "privacy:", "openprivacy:", "discover:", "latest:", "search:", "searchprompt:", "random:", "publicentry:", "copy:", "playpublic:", "grade:", "startpractice:", "resume:", "cancelpractice:", "limitsprompt:", "reminderprompt:", "remindersoff:", "canceledit:", "activity:", "retryop:", "resultop:", "addsentence:", "grantprompt:")
+            ("library:", "entry:", "audios:", "archive:", "generate:", "generateall:", "regenerate:", "regen:", "play:", "edit:", "editen:", "replace:", "deleteaudio:", "deleteentry:", "confirmdelete:", "canceldelete:", "privacy:", "openprivacy:", "discover:", "latest:", "search:", "searchprompt:", "random:", "publicentry:", "copy:", "playpublic:", "grade:", "startpractice:", "resume:", "cancelpractice:", "limitsprompt:", "reminderprompt:", "remindersoff:", "canceledit:", "activity:", "retryop:", "resultop:", "addsentence:", "grantprompt:")
         ):
             user = await self.session.get(User, callback.from_user.id)
             approved = callback.from_user.id == self.settings.admin_telegram_id or (
@@ -409,6 +409,8 @@ class Handlers:
                     answer = await self.library(value, callback.message)
                 elif command == "entry":
                     answer = await self.entry(value, callback.message)
+                elif command == "audios":
+                    answer = await self.send_sentence_audios(value)
                 elif command == "generate":
                     answer = await self.generate_audio(value)
                 elif command == "generateall":
@@ -426,7 +428,7 @@ class Handlers:
                 elif command == "replace":
                     answer = await self.begin_recording_replace(value)
                 elif command == "deleteaudio":
-                    answer = await self.remove_audio(value)
+                    answer = await self.remove_audio(value, callback.message)
                 elif command == "deleteentry":
                     answer = await self.confirm_entry_deletion(value)
                 elif command == "confirmdelete":
@@ -997,29 +999,16 @@ class Handlers:
         from app.services.archive import original_recording
 
         original = await original_recording(self.session, self.incoming.actor_id, row.id)
-        keyboard = InlineKeyboardMarkup()
         if original:
             asset, media = original
             status = "archived" if media.archive_message_id else asset.state.replace("_", " ")
             if not media.archive_message_id and not self.settings.telegram_archive_enabled:
                 status = "retained; archive storage is disabled"
             result += f"\n\nOriginal recording: {status}."
-            if asset.state == "archive_failed" and self.settings.telegram_archive_enabled:
-                keyboard.add(
-                    InlineKeyboardButton("Retry archive", callback_data=f"archive:{row.id}")
-                )
-            if asset.state == "ready" and media.archive_message_id:
-                keyboard.add(
-                    InlineKeyboardButton(
-                        "Play original recording", callback_data=f"play:{asset.id}"
-                    )
-                )
-            keyboard.add(InlineKeyboardButton(
-                "Delete original recording", callback_data=f"deleteaudio:{asset.id}"
-            ))
-        if self.settings.telegram_archive_enabled:
-            from app.db.models import AudioAsset
+        from app.db.models import AudioAsset, Voice
+        from app.services.audio import generated_audio, staged_generated_audio
 
+        if self.settings.telegram_archive_enabled:
             replacement = await self.session.scalar(
                 select(AudioAsset).where(
                     AudioAsset.sentence_id == row.id,
@@ -1029,17 +1018,6 @@ class Handlers:
             )
             if replacement:
                 result += f"\n\nReplacement recording: {replacement.state.replace('_', ' ')}."
-                if replacement.state == "archive_failed":
-                    keyboard.add(
-                        InlineKeyboardButton(
-                            "Retry replacement archive", callback_data=f"archive:{row.id}"
-                        )
-                    )
-            keyboard.add(
-                InlineKeyboardButton("Replace original recording", callback_data=f"replace:{row.id}")
-            )
-        from app.db.models import Voice
-        from app.services.audio import generated_audio, staged_generated_audio
 
         voices = (await self.session.scalars(select(Voice).order_by(Voice.id))).all()
         for voice in voices:
@@ -1050,45 +1028,86 @@ class Handlers:
             voice_name = display_voice_name(voice.id)
             if staged:
                 result += f"\n\n{voice_name} replacement audio: {staged.state}."
-                if staged.state == "failed":
-                    keyboard.add(InlineKeyboardButton(
-                        f"Retry {voice_name} replacement",
-                        callback_data=f"regen:{row.id}:{voice.id}",
-                    ))
-            elif generated and generated.state == "ready":
-                keyboard.add(InlineKeyboardButton(
-                    f"Play {voice_name}", callback_data=f"play:{generated.id}"
-                ))
-                keyboard.add(InlineKeyboardButton(
-                    f"Regenerate {voice_name}",
-                    callback_data=f"regen:{row.id}:{voice.id}",
-                ))
-            elif self.settings.telegram_tts_enabled:
-                if generated and generated.state == "failed":
-                    result += f"\n\nCould not generate {voice_name} audio. Your text and translation are saved."
-                elif generated:
-                    result += f"\n\n{voice_name} audio: {generated.state}."
-                if not generated or generated.state == "failed":
-                    label = f"Retry {voice_name}" if generated else f"Generate {voice_name}"
-                    keyboard.add(InlineKeyboardButton(
-                        label, callback_data=f"generate:{row.id}:{voice.id}"
-                    ))
-            if generated or staged:
-                target = staged or generated
-                keyboard.add(InlineKeyboardButton(
-                    f"Delete {voice_name} audio", callback_data=f"deleteaudio:{target.id}"
-                ))
-        if self.settings.telegram_tts_enabled and voices:
-            keyboard.add(InlineKeyboardButton(
-                "Generate missing voices", callback_data=f"generateall:{row.id}"
-            ))
-        keyboard.add(InlineKeyboardButton("Refresh entry", callback_data=f"entry:{row.id}"))
-        keyboard.add(InlineKeyboardButton("Edit German", callback_data=f"edit:{row.id}"))
-        keyboard.add(InlineKeyboardButton("Edit English", callback_data=f"editen:{row.id}"))
-        keyboard.add(InlineKeyboardButton("Delete entry", callback_data=f"deleteentry:{row.id}"))
+            elif generated and generated.state == "failed":
+                result += f"\n\nCould not generate {voice_name} audio. Your text and translation are saved."
+            elif generated and generated.state != "ready":
+                result += f"\n\n{voice_name} audio: {generated.state}."
+
+        keyboard = InlineKeyboardMarkup()
+        keyboard.add(InlineKeyboardButton("🔊 Audios", callback_data=f"audios:{row.id}"))
+        keyboard.row(
+            InlineKeyboardButton("🔄", callback_data=f"entry:{row.id}"),
+            InlineKeyboardButton("🗑", callback_data=f"deleteentry:{row.id}"),
+        )
+        keyboard.row(
+            InlineKeyboardButton("✏️ DU", callback_data=f"edit:{row.id}"),
+            InlineKeyboardButton("✏️ EN", callback_data=f"editen:{row.id}"),
+        )
         return result, keyboard
 
-    async def remove_audio(self, value):
+    async def send_sentence_audios(self, value):
+        from app.db.models import AudioAsset, StoredMedia, Voice
+        from app.services.archive import copy_payload
+        from app.services.collections import get_owned_sentence
+
+        try:
+            sentence_id = normalize_id(value, expected_kind="sentence")
+        except ValueError:
+            return "Entry unavailable."
+        sentence = await get_owned_sentence(self.session, self.incoming.actor_id, sentence_id)
+        if sentence is None:
+            return "Entry unavailable."
+        rows = (
+            await self.session.execute(
+                select(AudioAsset, StoredMedia, Voice)
+                .join(StoredMedia, StoredMedia.id == AudioAsset.stored_media_id)
+                .outerjoin(Voice, Voice.id == AudioAsset.voice_id)
+                .where(
+                    AudioAsset.sentence_id == sentence.id,
+                    AudioAsset.active.is_(True),
+                    AudioAsset.state == "ready",
+                    StoredMedia.archive_chat_id.is_not(None),
+                    StoredMedia.archive_message_id.is_not(None),
+                    StoredMedia.delete_pending.is_(False),
+                )
+                .order_by(
+                    case((AudioAsset.kind == "original", 0), else_=1),
+                    Voice.id,
+                    AudioAsset.id,
+                )
+            )
+        ).all()
+        sent = 0
+        for asset, media, voice in rows:
+            if asset.kind == "original":
+                label = "Original recording"
+                action = InlineKeyboardButton(
+                    "🔁 Replace", callback_data=f"replace:{sentence.id}"
+                )
+            else:
+                label = display_voice_name(voice.id) if voice else "Generated recording"
+                action = InlineKeyboardButton(
+                    "🔄 Regenerate", callback_data=f"regen:{sentence.id}:{asset.voice_id}"
+                )
+            keyboard = InlineKeyboardMarkup()
+            keyboard.row(
+                action,
+                InlineKeyboardButton("🗑 Delete", callback_data=f"deleteaudio:{asset.id}"),
+            )
+            payload = copy_payload(
+                self.incoming.actor_id, media.archive_chat_id, media.archive_message_id
+            )
+            payload["caption"] = f"<b>{escape(label)}</b>"
+            payload["parse_mode"] = "HTML"
+            payload["reply_markup"] = keyboard.to_dict()
+            self.emit(f"sentence_audio:{asset.id}", "copy_message", payload)
+            sent += 1
+        if not sent:
+            self.say("No archived recordings are ready for this sentence.")
+            return "No recordings are ready."
+        return f"Sent {sent} recording(s)."
+
+    async def remove_audio(self, value, message=None):
         from app.services.deletion import delete_audio
 
         try:
@@ -1097,8 +1116,15 @@ class Handlers:
             return "Audio unavailable."
         if not await delete_audio(self.session, self.incoming.actor_id, asset_id):
             return "Audio unavailable."
-        self.say("Audio removed from this entry. Unshared archived media will be cleaned up.")
-        return "Audio removed."
+        if message is not None and getattr(message, "audio", None):
+            self.emit(
+                "delete_audio_copy",
+                "delete_message",
+                {"chat_id": message.chat.id, "message_id": message.message_id},
+            )
+        else:
+            self.say("Audio removed from this entry. Unshared archived media will be cleaned up.")
+        return "Audio removed from this entry."
 
     async def confirm_entry_deletion(self, value):
         from app.services.collections import get_owned_sentence
