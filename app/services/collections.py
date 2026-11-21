@@ -52,15 +52,15 @@ async def search_library(session, user_id, language, query, *, limit=20):
     """Search one owner's library with a bounded substring query, newest first."""
     column = {"de": Sentence.german, "en": Sentence.english}.get(language)
     term = " ".join(query.split())[:100]
-    if column is None or not term:
+    if column is None:
         return []
-    escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    query_stmt = select(Sentence).where(Sentence.user_id == user_id)
+    if term:
+        escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        query_stmt = query_stmt.where(column.ilike(f"%{escaped}%", escape="\\"))
     return (
         await session.scalars(
-            select(Sentence)
-            .where(Sentence.user_id == user_id, column.ilike(f"%{escaped}%", escape="\\"))
-            .order_by(Sentence.created_at.desc(), Sentence.id.desc())
-            .limit(limit)
+            query_stmt.order_by(Sentence.created_at.desc(), Sentence.id.desc()).limit(limit)
         )
     ).all()
 

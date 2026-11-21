@@ -174,7 +174,7 @@ class Handlers:
         approved = inline_query.from_user.id == self.settings.admin_telegram_id or (
             user is not None and user.status == "approved"
         )
-        if approved and language and term:
+        if approved and language:
             from app.services.collections import search_library
 
             rows = await search_library(self.session, inline_query.from_user.id, language, term)
