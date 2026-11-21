@@ -4,8 +4,8 @@ import asyncio
 import logging
 from contextlib import suppress
 from datetime import timedelta
-from uuid import uuid4
 
+from app.core.idgen import format_id, generate_claim_token, generate_id
 import httpx
 from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
@@ -30,7 +30,7 @@ class StaleOperationClaim(Exception):
 
 
 async def create_operation(session, user_id, chat_id, message_id, file_id, german):
-    operation_id = uuid4()
+    operation_id = generate_id()
     inserted = await session.scalar(
         insert(Operation)
         .values(
@@ -117,7 +117,7 @@ class OperationRunner:
             )
             if row is None:
                 return None
-            row.state, row.claim_token = "running", uuid4()
+            row.state, row.claim_token = "running", generate_claim_token()
             row.lease_until = func.now() + timedelta(seconds=LEASE_SECONDS)
             row.attempts += 1
             await session.flush()
@@ -233,7 +233,7 @@ class OperationRunner:
                     if len(result) > 3800:
                         german = row.german[:1800] + ("…" if len(row.german) > 1800 else "")
                         english = row.english[:1800] + ("…" if len(row.english) > 1800 else "")
-                        result = f"German:\n{german}\n\nEnglish:\n{english}\n\nFull text: /result {row.id}"
+                        result = f"German:\n{german}\n\nEnglish:\n{english}\n\nFull text: /result {format_id('operation', row.id)}"
                     if sentence.duplicate_warning:
                         result += f"\n\n{DUPLICATE_WARNING}"
                     if self.settings.telegram_tts_enabled:
@@ -267,7 +267,7 @@ class OperationRunner:
             if finished and permanent:
                 with suppress(Exception):
                     await self.render(
-                        row, f"Could not finish {row.step}. Retry with /retry {row.id}", failed=True
+                        row, f"Could not finish {row.step}. Retry with /retry {format_id('operation', row.id)}", failed=True
                     )
         finally:
             heartbeat.cancel()

@@ -1,10 +1,10 @@
 """Async clients for the model APIs. Stable IDs resume existing durable model jobs."""
 
 import asyncio
-from uuid import uuid5
 
 import httpx
 
+from app.core.idgen import derive_id
 from app.voice_catalog import DEFAULT_VOICE_ID
 
 
@@ -40,7 +40,7 @@ class ModelClient:
             await asyncio.sleep(0.5)
 
     async def transcribe(self, operation, transport):
-        job_id = uuid5(operation.id, f"asr:{operation.generation}")
+        job_id = derive_id("asr", operation.id, operation.generation)
         url = self.settings.asr_url.rstrip("/") + f"/jobs/{job_id}"
         existing = await self.client.get(url)
         if existing.status_code != 404:
@@ -52,13 +52,13 @@ class ModelClient:
         return result["text"]
 
     async def translate(self, operation):
-        job_id = uuid5(operation.id, f"translation:{operation.generation}")
+        job_id = derive_id("translation", operation.id, operation.generation)
         result = await self.run("translation", job_id, text=operation.german)
         return result["text"]
 
     @staticmethod
     def speech_id(job):
-        return uuid5(job.asset_id, f"tts:{job.generation}")
+        return derive_id("tts", job.asset_id, job.generation)
 
     async def synthesize(self, job, german, voice_id=DEFAULT_VOICE_ID):
         return await self.run("tts", self.speech_id(job), text=german, voice_id=voice_id)

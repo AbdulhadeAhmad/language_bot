@@ -3,8 +3,8 @@
 import asyncio
 import logging
 from datetime import timedelta
-from uuid import uuid4
 
+from app.core.idgen import generate_claim_token
 from sqlalchemy import and_, func, or_, select
 
 from app.bot.transport import RejectedDelivery
@@ -149,7 +149,7 @@ class MediaDeletionRunner:
             media.delete_pending = True
             job.target_chat_id = media.archive_chat_id
             job.target_message_id = media.archive_message_id
-            job.state, job.claim_token = "running", uuid4()
+            job.state, job.claim_token = "running", generate_claim_token()
             job.attempts += 1
             job.lease_until = func.now() + timedelta(seconds=LEASE_SECONDS)
             await session.flush()

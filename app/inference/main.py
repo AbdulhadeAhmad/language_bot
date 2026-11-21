@@ -8,8 +8,8 @@ from contextlib import asynccontextmanager, suppress
 from datetime import timedelta
 from pathlib import Path
 from typing import Literal
-from uuid import UUID, uuid4
 
+from app.core.idgen import generate_claim_token, normalize_id
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field, SecretStr
@@ -65,7 +65,7 @@ class ModelQueue:
             )
             if job is None:
                 return None
-            job.state, job.claim_token = "running", uuid4()
+            job.state, job.claim_token = "running", generate_claim_token()
             job.lease_until = func.now() + timedelta(seconds=60)
             job.attempts += 1
             await session.flush()
@@ -220,7 +220,11 @@ def create_app(settings=None, database=None, infer=None, run_worker=True):
         return {"status": "ready", "kind": settings.model_kind}
 
     @app.put("/jobs/{job_id}", status_code=202)
-    async def submit(job_id: UUID, request: Request):
+    async def submit(job_id: str, request: Request):
+        try:
+            job_id = normalize_id(job_id)
+        except ValueError:
+            raise HTTPException(422, "Invalid custom job ID") from None
         body = bytearray()
         limit = 20 * 1024 * 1024 if settings.model_kind == "asr" else 80000
         async for chunk in request.stream():
@@ -272,7 +276,7 @@ def create_app(settings=None, database=None, infer=None, run_worker=True):
             input_path = None
             if input_text is None:
                 path = queue.directory / f"{job_id}.input"
-                temporary = path.with_suffix(f".{uuid4()}.tmp")
+                temporary = path.with_suffix(f".{generate_claim_token()}.tmp")
                 await asyncio.to_thread(temporary.write_bytes, body)
                 temporary.replace(path)
                 input_path = str(path)
@@ -289,7 +293,11 @@ def create_app(settings=None, database=None, infer=None, run_worker=True):
         return {"id": str(job_id), "state": "pending"}
 
     @app.get("/jobs/{job_id}")
-    async def result(job_id: UUID):
+    async def result(job_id: str):
+        try:
+            job_id = normalize_id(job_id)
+        except ValueError:
+            raise HTTPException(422, "Invalid custom job ID") from None
         async with database.sessions() as session:
             job = await session.get(ModelJob, (job_id, settings.model_kind))
             if not job:
@@ -303,7 +311,11 @@ def create_app(settings=None, database=None, infer=None, run_worker=True):
             }
 
     @app.get("/jobs/{job_id}/audio")
-    async def audio(job_id: UUID, format: Literal["wav", "mp3"] = "wav"):
+    async def audio(job_id: str, format: Literal["wav", "mp3"] = "wav"):
+        try:
+            job_id = normalize_id(job_id)
+        except ValueError:
+            raise HTTPException(422, "Invalid custom job ID") from None
         async with database.sessions() as session:
             job = await session.get(ModelJob, (job_id, settings.model_kind))
             if not job or job.state != "done" or not job.output_path:
@@ -316,7 +328,11 @@ def create_app(settings=None, database=None, infer=None, run_worker=True):
         return FileResponse(path, media_type="audio/wav")
 
     @app.delete("/jobs/{job_id}", status_code=204)
-    async def discard(job_id: UUID):
+    async def discard(job_id: str):
+        try:
+            job_id = normalize_id(job_id)
+        except ValueError:
+            raise HTTPException(422, "Invalid custom job ID") from None
         async with database.sessions.begin() as session:
             job = await session.scalar(
                 select(ModelJob)

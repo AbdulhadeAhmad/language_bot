@@ -1,6 +1,6 @@
 import asyncio
 from datetime import timedelta
-from uuid import uuid4
+from app.core.idgen import generate_id
 
 import httpx
 from sqlalchemy import func, select
@@ -103,8 +103,8 @@ async def test_generation_is_opt_in_and_duplicate_requests_share_one_asset(db, c
     assert len(models.generated) == 1 and len(transport.uploaded) == 1
     assert transport.uploaded[0][0] == -10088
     assert sentence.german in transport.metadata[0]["caption"]
-    assert f"#sentence_{sentence.id.hex}" in transport.metadata[0]["caption"]
-    assert f"#user_{sentence.user_id}" in transport.metadata[0]["caption"]
+    assert f"#ST_{sentence.id}" in transport.metadata[0]["caption"]
+    assert "#UR_" in transport.metadata[0]["caption"]
     assert "#de_DE_thorsten_medium" in transport.metadata[0]["caption"]
     assert sentence.english in transport.metadata[0]["caption"]
     assert transport.metadata[0]["parse_mode"] == "HTML"
@@ -157,13 +157,13 @@ async def test_audio_deletion_waits_for_last_active_reference(db, config):
         session.add(User(id=22, status="approved"))
         await session.flush()
         copied = Sentence(
-            id=uuid4(), user_id=22, german=sentence.german, english=sentence.english,
+            id=generate_id(), user_id=22, german=sentence.german, english=sentence.english,
             normalized_german=sentence.normalized_german,
         )
         session.add(copied)
         await session.flush()
         shared_asset = AudioAsset(
-            id=uuid4(), sentence_id=copied.id, stored_media_id=media.id,
+            id=generate_id(), sentence_id=copied.id, stored_media_id=media.id,
             voice_id=asset.voice_id, kind="generated", state="ready",
         )
         session.add(shared_asset)
@@ -366,7 +366,7 @@ async def test_tts_model_http_mp3_download_and_cleanup_contract(db, config, tmp_
             assert job.state == "done" and model.output_path is None
         assert list((tmp_path / "jobs/tts").iterdir()) == []
         # Long voice transcriptions are accepted by the TTS contract.
-        response = await client.put(f"/jobs/{uuid4()}", json={"text": "Guten Morgen. " * 200})
+        response = await client.put(f"/jobs/{generate_id()}", json={"text": "Guten Morgen. " * 200})
         assert response.status_code == 202
 
 

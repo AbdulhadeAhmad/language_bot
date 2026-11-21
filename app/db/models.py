@@ -1,5 +1,4 @@
 from datetime import date, datetime, time
-from uuid import UUID
 
 from sqlalchemy import (
     BigInteger,
@@ -17,8 +16,9 @@ from sqlalchemy import (
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+from app.core.idgen import generate_id
 
 
 class Base(DeclarativeBase):
@@ -27,10 +27,10 @@ class Base(DeclarativeBase):
 
 class Sentence(Base):
     __tablename__ = "sentences"
-    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    id: Mapped[str] = mapped_column(String(8), primary_key=True)
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
-    capture_operation_id: Mapped[UUID | None] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("operations.id"), unique=True
+    capture_operation_id: Mapped[str | None] = mapped_column(
+        String(8), ForeignKey("operations.id"), unique=True
     )
     german: Mapped[str] = mapped_column(String)
     normalized_german: Mapped[str] = mapped_column(String, index=True)
@@ -39,8 +39,8 @@ class Sentence(Base):
     review_revision: Mapped[int] = mapped_column(Integer, server_default="1")
     state: Mapped[str] = mapped_column(String(16), server_default="ready")
     duplicate_warning: Mapped[bool] = mapped_column(Boolean, server_default="false")
-    copied_from_sentence_id: Mapped[UUID | None] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("sentences.id", ondelete="SET NULL"), index=True
+    copied_from_sentence_id: Mapped[str | None] = mapped_column(
+        String(8), ForeignKey("sentences.id", ondelete="SET NULL"), index=True
     )
     status_message_id: Mapped[int | None] = mapped_column(BigInteger)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -56,8 +56,8 @@ class InteractionState(Base):
         BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )
     kind: Mapped[str] = mapped_column(String(32))
-    sentence_id: Mapped[UUID] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("sentences.id", ondelete="CASCADE")
+    sentence_id: Mapped[str] = mapped_column(
+        String(8), ForeignKey("sentences.id", ondelete="CASCADE")
     )
     sentence_revision: Mapped[int] = mapped_column(Integer)
     step: Mapped[str] = mapped_column(String(16))
@@ -71,8 +71,8 @@ class SentenceEditJob(Base):
         CheckConstraint("state IN ('pending','running','done','failed','cancelled')", name="sentence_edit_job_state"),
         Index("ix_sentence_edit_jobs_ready", "state", "available_at"),
     )
-    sentence_id: Mapped[UUID] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("sentences.id", ondelete="CASCADE"), primary_key=True
+    sentence_id: Mapped[str] = mapped_column(
+        String(8), ForeignKey("sentences.id", ondelete="CASCADE"), primary_key=True
     )
     base_revision: Mapped[int] = mapped_column(Integer)
     target_revision: Mapped[int] = mapped_column(Integer)
@@ -83,7 +83,7 @@ class SentenceEditJob(Base):
     error_type: Mapped[str | None] = mapped_column(String(100))
     available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    claim_token: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    claim_token: Mapped[str | None] = mapped_column(String(24))
 
 
 class Voice(Base):
@@ -95,7 +95,7 @@ class Voice(Base):
 
 class StoredMedia(Base):
     __tablename__ = "stored_media"
-    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    id: Mapped[str] = mapped_column(String(8), primary_key=True)
     telegram_file_id: Mapped[str] = mapped_column(String)
     archive_chat_id: Mapped[int | None] = mapped_column(BigInteger)
     archive_message_id: Mapped[int | None] = mapped_column(BigInteger)
@@ -119,12 +119,12 @@ class AudioAsset(Base):
             postgresql_where="active AND kind = 'generated'",
         ),
     )
-    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
-    sentence_id: Mapped[UUID] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("sentences.id", ondelete="CASCADE"), index=True
+    id: Mapped[str] = mapped_column(String(8), primary_key=True)
+    sentence_id: Mapped[str] = mapped_column(
+        String(8), ForeignKey("sentences.id", ondelete="CASCADE"), index=True
     )
-    stored_media_id: Mapped[UUID | None] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("stored_media.id")
+    stored_media_id: Mapped[str | None] = mapped_column(
+        String(8), ForeignKey("stored_media.id")
     )
     voice_id: Mapped[str | None] = mapped_column(String(100), ForeignKey("voices.id"))
     kind: Mapped[str] = mapped_column(String(16))
@@ -139,8 +139,8 @@ class ArchiveJob(Base):
         CheckConstraint("state IN ('pending','running','done','failed')", name="archive_job_state"),
         Index("ix_archive_jobs_ready", "state", "available_at"),
     )
-    media_id: Mapped[UUID] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("stored_media.id", ondelete="CASCADE"), primary_key=True
+    media_id: Mapped[str] = mapped_column(
+        String(8), ForeignKey("stored_media.id", ondelete="CASCADE"), primary_key=True
     )
     source_chat_id: Mapped[int] = mapped_column(BigInteger)
     source_message_id: Mapped[int] = mapped_column(BigInteger)
@@ -153,7 +153,7 @@ class ArchiveJob(Base):
         DateTime(timezone=True), server_default=func.now()
     )
     lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    claim_token: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    claim_token: Mapped[str | None] = mapped_column(String(24))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -163,8 +163,8 @@ class MediaDeletionJob(Base):
         CheckConstraint("state IN ('pending','running','done','failed','cancelled')", name="media_deletion_job_state"),
         Index("ix_media_deletion_jobs_ready", "state", "available_at"),
     )
-    media_id: Mapped[UUID] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("stored_media.id", ondelete="CASCADE"), primary_key=True
+    media_id: Mapped[str] = mapped_column(
+        String(8), ForeignKey("stored_media.id", ondelete="CASCADE"), primary_key=True
     )
     target_chat_id: Mapped[int | None] = mapped_column(BigInteger)
     target_message_id: Mapped[int | None] = mapped_column(BigInteger)
@@ -173,7 +173,7 @@ class MediaDeletionJob(Base):
     error_type: Mapped[str | None] = mapped_column(String(100))
     available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    claim_token: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    claim_token: Mapped[str | None] = mapped_column(String(24))
 
 
 class AudioJob(Base):
@@ -185,8 +185,8 @@ class AudioJob(Base):
         CheckConstraint("step IN ('synthesize','upload')", name="audio_job_step"),
         Index("ix_audio_jobs_ready", "state", "available_at"),
     )
-    asset_id: Mapped[UUID] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("audio_assets.id", ondelete="CASCADE"), primary_key=True
+    asset_id: Mapped[str] = mapped_column(
+        String(8), ForeignKey("audio_assets.id", ondelete="CASCADE"), primary_key=True
     )
     sentence_revision: Mapped[int] = mapped_column(Integer)
     generation: Mapped[int] = mapped_column(Integer, server_default="0")
@@ -200,7 +200,7 @@ class AudioJob(Base):
         DateTime(timezone=True), server_default=func.now()
     )
     lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    claim_token: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    claim_token: Mapped[str | None] = mapped_column(String(24))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -212,8 +212,10 @@ class User(Base):
         ),
         CheckConstraint("new_cards_per_day BETWEEN 0 AND 100", name="user_new_cards_per_day"),
         CheckConstraint("review_session_limit BETWEEN 1 AND 100", name="user_review_session_limit"),
+        UniqueConstraint("public_id", name="uq_users_public_id"),
     )
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
+    public_id: Mapped[str] = mapped_column(String(8), nullable=False, default=generate_id)
     first_name: Mapped[str | None] = mapped_column(String)
     last_name: Mapped[str | None] = mapped_column(String)
     username: Mapped[str | None] = mapped_column(String)
@@ -241,8 +243,8 @@ class ReviewCard(Base):
         ),
         Index("ix_review_cards_due", "mode", "due_at"),
     )
-    sentence_id: Mapped[UUID] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("sentences.id", ondelete="CASCADE"), primary_key=True
+    sentence_id: Mapped[str] = mapped_column(
+        String(8), ForeignKey("sentences.id", ondelete="CASCADE"), primary_key=True
     )
     mode: Mapped[str] = mapped_column(String(24), primary_key=True)
     card_state: Mapped[dict] = mapped_column(JSONB)
@@ -263,17 +265,17 @@ class ReviewSession(Base):
             postgresql_where="state = 'active'",
         ),
     )
-    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    id: Mapped[str] = mapped_column(String(8), primary_key=True)
     user_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
     mode: Mapped[str] = mapped_column(String(24))
     state: Mapped[str] = mapped_column(String(16), server_default="active")
-    current_sentence_id: Mapped[UUID | None] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("sentences.id", ondelete="SET NULL")
+    current_sentence_id: Mapped[str | None] = mapped_column(
+        String(8), ForeignKey("sentences.id", ondelete="SET NULL")
     )
-    current_audio_asset_id: Mapped[UUID | None] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("audio_assets.id", ondelete="SET NULL")
+    current_audio_asset_id: Mapped[str | None] = mapped_column(
+        String(8), ForeignKey("audio_assets.id", ondelete="SET NULL")
     )
     awaiting_answer: Mapped[bool] = mapped_column(Boolean, server_default="false")
     submitted_answer: Mapped[str | None] = mapped_column(String)
@@ -293,12 +295,12 @@ class ReviewAttempt(Base):
         UniqueConstraint("session_id", "question_number", name="uq_review_attempt_question"),
         Index("ix_review_attempts_sentence", "sentence_id", "mode", "reviewed_at"),
     )
-    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
-    session_id: Mapped[UUID] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("review_sessions.id", ondelete="CASCADE")
+    id: Mapped[str] = mapped_column(String(8), primary_key=True)
+    session_id: Mapped[str] = mapped_column(
+        String(8), ForeignKey("review_sessions.id", ondelete="CASCADE")
     )
-    sentence_id: Mapped[UUID] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("sentences.id", ondelete="CASCADE")
+    sentence_id: Mapped[str] = mapped_column(
+        String(8), ForeignKey("sentences.id", ondelete="CASCADE")
     )
     mode: Mapped[str] = mapped_column(String(24))
     question_number: Mapped[int] = mapped_column(Integer)
@@ -331,7 +333,7 @@ class Operation(Base):
             name="operation_state",
         ),
     )
-    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    id: Mapped[str] = mapped_column(String(8), primary_key=True)
     user_id: Mapped[int] = mapped_column(BigInteger)
     chat_id: Mapped[int] = mapped_column(BigInteger)
     source_message_id: Mapped[int] = mapped_column(BigInteger)
@@ -349,7 +351,7 @@ class Operation(Base):
         DateTime(timezone=True), server_default=func.now()
     )
     lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    claim_token: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    claim_token: Mapped[str | None] = mapped_column(String(24))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -362,7 +364,7 @@ class ModelJob(Base):
         CheckConstraint("kind IN ('asr','translation','tts')", name="model_kind"),
         CheckConstraint("state IN ('pending','running','done','failed')", name="model_job_state"),
     )
-    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    id: Mapped[str] = mapped_column(String(8), primary_key=True)
     kind: Mapped[str] = mapped_column(String(16), primary_key=True)
     fingerprint: Mapped[str] = mapped_column(String(64))
     input_text: Mapped[str | None] = mapped_column(String)
@@ -377,5 +379,5 @@ class ModelJob(Base):
         DateTime(timezone=True), server_default=func.now()
     )
     lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    claim_token: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    claim_token: Mapped[str | None] = mapped_column(String(24))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

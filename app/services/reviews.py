@@ -1,8 +1,8 @@
 """Persistent single-mode review sessions and fenced grading operations."""
 
 from datetime import UTC, datetime, time
-from uuid import UUID, uuid4
 
+from app.core.idgen import generate_id
 from sqlalchemy import func, select, update
 
 from app.db.models import (
@@ -152,7 +152,7 @@ async def start_session(session, user_id: int, mode: str, now: datetime | None =
     for sentence in sentences:
         await ensure_review_cards(session, sentence, now)
 
-    review_session = ReviewSession(id=uuid4(), user_id=user_id, mode=mode)
+    review_session = ReviewSession(id=generate_id(), user_id=user_id, mode=mode)
     session.add(review_session)
     await session.flush()
     sentence = await _next_question(session, review_session, user, now)
@@ -164,7 +164,7 @@ async def start_session(session, user_id: int, mode: str, now: datetime | None =
 async def grade_question(
     session,
     user_id: int,
-    session_id: UUID,
+    session_id: str,
     question_number: int,
     rating: int,
     now: datetime | None = None,
@@ -224,7 +224,7 @@ async def grade_question(
         return None, "invalid_rating"
 
     session.add(ReviewAttempt(
-        id=uuid4(),
+        id=generate_id(),
         session_id=review_session.id,
         sentence_id=sentence.id,
         mode=review_session.mode,

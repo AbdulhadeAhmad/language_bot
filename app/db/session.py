@@ -1,7 +1,7 @@
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 
-SCHEMA_REVISION = "0015_multi_voice_tts"
+SCHEMA_REVISION = "0016_custom_ids"
 
 
 class Database:

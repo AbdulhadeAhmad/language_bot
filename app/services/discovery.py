@@ -1,7 +1,7 @@
 """Current-visibility public queries, privacy changes, and independent copies."""
 
-from uuid import uuid4
 
+from app.core.idgen import generate_id
 from sqlalchemy import func, or_, select
 
 from app.db.models import AudioAsset, Sentence, StoredMedia, User
@@ -91,7 +91,7 @@ async def copy_public_sentence(session, user_id, sentence_id, settings=None):
     if source is None:
         return None
     sentence = Sentence(
-        id=uuid4(),
+        id=generate_id(),
         user_id=user_id,
         german=source.german,
         normalized_german=normalize_german(source.german),
@@ -122,7 +122,7 @@ async def copy_public_sentence(session, user_id, sentence_id, settings=None):
         if media is None or media.delete_pending:
             continue
         session.add(AudioAsset(
-            id=uuid4(), sentence_id=sentence.id, stored_media_id=media.id,
+            id=generate_id(), sentence_id=sentence.id, stored_media_id=media.id,
             voice_id=asset.voice_id, kind="generated", state="ready", active=True,
         ))
     if settings is not None:

@@ -1,7 +1,8 @@
 import json
+from html import escape
 from datetime import UTC, datetime
-from uuid import uuid4
 
+from app.core.idgen import find_typed_ids, format_id, generate_id, normalize_id
 from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from telebot.async_telebot import AsyncTeleBot
@@ -132,7 +133,7 @@ class Handlers:
         keyboard = InlineKeyboardMarkup()
         lines = []
         for row in rows:
-            lines.append(f"<code>{row.id}</code> · {row.step} · {row.state}")
+            lines.append(f"<code>{format_id('operation', row.id)}</code> · {row.step} · {row.state}")
             if row.state in {"failed", "cancelled"}:
                 keyboard.row(
                     InlineKeyboardButton("Retry", callback_data=f"retryop:{row.id}"),
@@ -151,6 +152,40 @@ class Handlers:
     def prompt(self, text, placeholder):
         self.say(text, keyboard=ForceReply(selective=True, input_field_placeholder=placeholder))
 
+    async def resolve_typed_id(self, kind, body):
+        if kind == "sentence":
+            from app.services.collections import get_owned_sentence
+
+            owned = await get_owned_sentence(self.session, self.incoming.actor_id, body)
+            if owned is not None:
+                await self.entry(body)
+            else:
+                await self.public_entry(body)
+            return
+        if kind == "user":
+            user = await self.session.scalar(select(User).where(User.public_id == body))
+            if user is None or (
+                user.id != self.incoming.actor_id
+                and self.incoming.actor_id != self.settings.admin_telegram_id
+            ):
+                self.say("User unavailable.")
+                return
+            name = " ".join(part for part in (user.first_name, user.last_name) if part) or "—"
+            self.say(
+                f"<b>User</b>\n{format_id('user', user.public_id)}\n"
+                f"Name: {escape(name)}\nUsername: @{escape(user.username or '—')}\n"
+                f"Access: {escape(user.status)}",
+                parse_mode="HTML",
+            )
+            return
+        if kind == "operation":
+            await self.result_activity(body)
+            return
+        if kind == "audio":
+            await self.play_audio(body)
+            return
+        self.say("That ID type cannot be opened here.")
+
     def buttons(self, user):
         keyboard = InlineKeyboardMarkup()
         choices = {
@@ -162,7 +197,7 @@ class Handlers:
         for label, status in choices[user.status]:
             keyboard.add(
                 InlineKeyboardButton(
-                    label, callback_data=f"access:{user.id}:{user.version}:{status}"
+                    label, callback_data=f"access:{user.public_id}:{user.version}:{status}"
                 )
             )
         return keyboard
@@ -187,7 +222,7 @@ class Handlers:
         if sender.id == self.settings.admin_telegram_id:
             user.status = "approved"
         self.say(
-            f"Your access status: {user.status}."
+            f"Your access status: {user.status}.\nProfile ID: {format_id('user', user.public_id)}"
             + (
                 " Use /admin to manage access."
                 if sender.id == self.settings.admin_telegram_id
@@ -201,7 +236,7 @@ class Handlers:
             user.approval_notice_state = "sending"
             name = " ".join(part for part in [user.first_name, user.last_name] if part)
             self.say(
-                f"Access request\nID: {user.id}\nName: {name}\nUsername: {user.username or '—'}\nLanguage: {user.language_code or '—'}",
+                f"Access request\nID: {format_id('user', user.public_id)}\nName: {name}\nUsername: {user.username or '—'}\nLanguage: {user.language_code or '—'}",
                 key="request",
                 user_id=self.settings.admin_notification_channel_id,
                 keyboard=self.buttons(user),
@@ -261,8 +296,8 @@ class Handlers:
         users = (await self.session.scalars(query.offset(page * 5).limit(6))).all()
         for user in users[:5]:
             self.say(
-                f"{user.id} | {user.first_name or ''} {user.last_name or ''} | @{user.username or '—'} | {user.status}",
-                key=f"user:{user.id}",
+                f"{format_id('user', user.public_id)} | {user.first_name or ''} {user.last_name or ''} | @{user.username or '—'} | {user.status}",
+                key=f"user:{user.public_id}",
                 keyboard=None if user.id == self.settings.admin_telegram_id else self.buttons(user),
             )
         navigation = InlineKeyboardMarkup()
@@ -293,7 +328,7 @@ class Handlers:
                 {
                     "chat_id": self.settings.admin_notification_channel_id,
                     "message_id": user.approval_message_id,
-                    "text": f"User {user.id}: {status}",
+                    "text": f"User {format_id('user', user.public_id)}: {status}",
                     "reply_markup": InlineKeyboardMarkup().to_dict(),
                 },
                 "admin",
@@ -433,12 +468,17 @@ class Handlers:
             elif (
                 len(parts) == 4
                 and parts[0] == "access"
-                and parts[1].isdigit()
                 and parts[2].isdigit()
-                and int(parts[1]) < 2**63
             ):
-                user = await self.session.scalar(
-                    select(User).where(User.id == int(parts[1])).with_for_update()
+                try:
+                    public_id = normalize_id(parts[1], expected_kind="user")
+                except ValueError:
+                    public_id = None
+                user = (
+                    await self.session.scalar(
+                        select(User).where(User.public_id == public_id).with_for_update()
+                    )
+                    if public_id else None
                 )
                 transitions = {
                     "pending": {"approved", "rejected"},
@@ -460,7 +500,7 @@ class Handlers:
                                 {
                                     "chat_id": callback.message.chat.id,
                                     "message_id": callback.message.message_id,
-                                    "text": f"User {user.id}: {user.status}",
+                                    "text": f"User {format_id('user', user.public_id)}: {user.status}",
                                     "reply_markup": InlineKeyboardMarkup().to_dict(),
                                 },
                                 "admin",
@@ -526,13 +566,27 @@ class Handlers:
             if reply_text.startswith("🛡 Grant access by Telegram ID"):
                 await self.grant_user(text)
                 return
+        if text and not text.startswith("/"):
+            import re
+
+            marker = re.search(r"#(ST|UR|OP|AU|MD|RS|RA|MJ|AC)_", text, re.IGNORECASE)
+            typed_ids = find_typed_ids(text)
+            if marker and not typed_ids:
+                self.say("That ID is malformed or unknown.")
+                return
+            if typed_ids:
+                if len(typed_ids) != 1:
+                    self.say("Send one typed ID at a time.")
+                    return
+                await self.resolve_typed_id(*typed_ids[0])
+                return
         if command and command[0] == "/help":
             self.say(
                 "Available commands:\n"
                 "/start — register or check access\n"
                 "/help — show this command list\n"
                 "/library [PAGE] — browse your saved sentences\n"
-                "/entry ID — open a saved sentence\n"
+                "/entry #ST_ID — open a saved sentence\n"
                 "/privacy — change your collection privacy\n"
                 "/discover — browse public sentences\n"
                 "/latest [PAGE] — view recent public sentences\n"
@@ -545,8 +599,8 @@ class Handlers:
                 "/reminders off — disable daily reminders\n"
                 "/cancelpractice — stop your active practice session\n"
                 "/status — view recent processing jobs\n"
-                "/retry ID — retry a failed processing job\n"
-                "/result ID — show the full result of a processing job\n"
+                "/retry #OP_ID — retry a failed processing job\n"
+                "/result #OP_ID — show the full result of a processing job\n"
                 "/cancel — cancel the current edit or recording replacement\n"
                 "/admin — list access requests (administrator only)\n"
                 "/admin grant TELEGRAM_ID — approve a user (administrator only)"
@@ -634,11 +688,11 @@ class Handlers:
                     if prior_job and prior_job.state in {"pending", "running"}:
                         prior_job.state, prior_job.error_type = "cancelled", "replacement_superseded"
                         prior_job.claim_token, prior_job.lease_until = None, None
-                media = StoredMedia(id=uuid4(), telegram_file_id=voice.file_id)
+                media = StoredMedia(id=generate_id(), telegram_file_id=voice.file_id)
                 self.session.add(media)
                 await self.session.flush()
                 self.session.add(AudioAsset(
-                    id=uuid4(), sentence_id=sentence.id, stored_media_id=media.id,
+                    id=generate_id(), sentence_id=sentence.id, stored_media_id=media.id,
                     kind="original", state="archiving", active=False, replacement=True,
                 ))
                 self.session.add(ArchiveJob(
@@ -706,11 +760,9 @@ class Handlers:
             await self.entry(command[1] if len(command) == 2 else "")
             return
         if text.startswith("/retry "):
-            from uuid import UUID
-
             try:
                 operation = await retry_operation(
-                    self.session, UUID(text.split()[1]), message.from_user.id
+                    self.session, normalize_id(text.split()[1], expected_kind="operation"), message.from_user.id
                 )
             except (ValueError, IndexError):
                 operation = None
@@ -722,12 +774,10 @@ class Handlers:
                 self.status_effect(operation)
             return
         if text.startswith("/result "):
-            from uuid import UUID
-
             from app.db.models import Operation
 
             try:
-                operation_id = UUID(text.split()[1])
+                operation_id = normalize_id(text.split()[1], expected_kind="operation")
             except (ValueError, IndexError):
                 self.say("Use /result with your operation ID.")
                 return
@@ -756,7 +806,7 @@ class Handlers:
             ).all()
             self.say(
                 "\n\n".join(
-                    f"{row.id}: {row.step} / {row.state}\nRetry: /retry {row.id}" for row in rows
+                    f"{format_id('operation', row.id)}: {row.step} / {row.state}\nRetry: /retry {format_id('operation', row.id)}" for row in rows
                 )
                 or "No processing operations yet."
             )
@@ -833,12 +883,10 @@ class Handlers:
         return "Collection opened."
 
     async def entry(self, value, message=None):
-        from uuid import UUID
-
         from app.services.collections import get_owned_sentence
 
         try:
-            sentence_id = UUID(value)
+            sentence_id = normalize_id(value, expected_kind="sentence")
         except ValueError:
             self.say("Use /entry with a saved entry ID.")
             return "Invalid entry."
@@ -864,7 +912,10 @@ class Handlers:
 
     async def build_sentence_message(self, row):
         """Build the detail text and inline controls for one sentence object."""
-        result = f"German:\n{row.german}\n\nEnglish:\n{row.english}"
+        result = (
+            f"German:\n{row.german}\n\nEnglish:\n{row.english}"
+            f"\n\nID: {format_id('sentence', row.id)}"
+        )
         if row.duplicate_warning:
             result += "\n\nSimilar German text exists in your collection or a public collection."
         from app.db.models import SentenceEditJob
@@ -931,7 +982,7 @@ class Handlers:
                 if staged.state == "failed":
                     keyboard.add(InlineKeyboardButton(
                         f"Retry {voice_name} replacement",
-                        callback_data=f"regen:{row.id.hex}:{voice.id}",
+                        callback_data=f"regen:{row.id}:{voice.id}",
                     ))
             elif generated and generated.state == "ready":
                 keyboard.add(InlineKeyboardButton(
@@ -939,7 +990,7 @@ class Handlers:
                 ))
                 keyboard.add(InlineKeyboardButton(
                     f"Regenerate {voice_name}",
-                    callback_data=f"regen:{row.id.hex}:{voice.id}",
+                    callback_data=f"regen:{row.id}:{voice.id}",
                 ))
             elif self.settings.telegram_tts_enabled:
                 if generated and generated.state == "failed":
@@ -949,7 +1000,7 @@ class Handlers:
                 if not generated or generated.state == "failed":
                     label = f"Retry {voice_name}" if generated else f"Generate {voice_name}"
                     keyboard.add(InlineKeyboardButton(
-                        label, callback_data=f"generate:{row.id.hex}:{voice.id}"
+                        label, callback_data=f"generate:{row.id}:{voice.id}"
                     ))
             if generated or staged:
                 target = staged or generated
@@ -967,12 +1018,10 @@ class Handlers:
         return result, keyboard
 
     async def remove_audio(self, value):
-        from uuid import UUID
-
         from app.services.deletion import delete_audio
 
         try:
-            asset_id = UUID(value)
+            asset_id = normalize_id(value, expected_kind="audio")
         except ValueError:
             return "Audio unavailable."
         if not await delete_audio(self.session, self.incoming.actor_id, asset_id):
@@ -981,12 +1030,10 @@ class Handlers:
         return "Audio removed."
 
     async def confirm_entry_deletion(self, value):
-        from uuid import UUID
-
         from app.services.collections import get_owned_sentence
 
         try:
-            sentence_id = UUID(value)
+            sentence_id = normalize_id(value, expected_kind="sentence")
         except ValueError:
             return "Entry unavailable."
         sentence = await get_owned_sentence(self.session, self.incoming.actor_id, sentence_id)
@@ -1005,12 +1052,10 @@ class Handlers:
         return "Confirm entry deletion."
 
     async def remove_entry(self, value):
-        from uuid import UUID
-
         from app.services.deletion import delete_sentence
 
         try:
-            sentence_id = UUID(value)
+            sentence_id = normalize_id(value, expected_kind="sentence")
         except ValueError:
             return "Entry unavailable."
         if not await delete_sentence(self.session, self.incoming.actor_id, sentence_id):
@@ -1019,13 +1064,11 @@ class Handlers:
         return "Entry deleted."
 
     async def begin_edit(self, value, field="german"):
-        from uuid import UUID
-
         from app.db.models import InteractionState
         from app.services.collections import get_owned_sentence
 
         try:
-            sentence_id = UUID(value)
+            sentence_id = normalize_id(value, expected_kind="sentence")
         except ValueError:
             return "Entry unavailable."
         sentence = await get_owned_sentence(self.session, self.incoming.actor_id, sentence_id)
@@ -1052,15 +1095,13 @@ class Handlers:
         return "German edit started."
 
     async def begin_recording_replace(self, value):
-        from uuid import UUID
-
         from app.db.models import InteractionState
         from app.services.collections import get_owned_sentence
 
         if not self.settings.telegram_archive_enabled:
             return "Recording replacement requires archive storage to be enabled."
         try:
-            sentence_id = UUID(value)
+            sentence_id = normalize_id(value, expected_kind="sentence")
         except ValueError:
             return "Entry unavailable."
         sentence = await get_owned_sentence(self.session, self.incoming.actor_id, sentence_id)
@@ -1084,15 +1125,13 @@ class Handlers:
         return "Send replacement recording."
 
     async def generate_audio(self, value):
-        from uuid import UUID
-
         from app.services.audio import request_audio
 
         if not self.settings.telegram_tts_enabled:
             return "German audio generation is not enabled yet."
         parts = value.split(":", 1)
         try:
-            sentence_id = UUID(parts[0])
+            sentence_id = normalize_id(parts[0], expected_kind="sentence")
         except ValueError:
             return "Entry unavailable."
         voice_id = parts[1] if len(parts) == 2 else None
@@ -1106,15 +1145,13 @@ class Handlers:
         return "German audio queued. Refresh the entry to check progress."
 
     async def generate_all_audio(self, value):
-        from uuid import UUID
-
         from app.db.models import Voice
         from app.services.audio import generated_audio, request_audio
 
         if not self.settings.telegram_tts_enabled:
             return "German audio generation is not enabled yet."
         try:
-            sentence_id = UUID(value)
+            sentence_id = normalize_id(value, expected_kind="sentence")
         except ValueError:
             return "Entry unavailable."
         voices = (await self.session.scalars(select(Voice).order_by(Voice.id))).all()
@@ -1131,15 +1168,13 @@ class Handlers:
         return f"Queued {queued} missing voice(s). Refresh the entry to check progress."
 
     async def regenerate_audio(self, value):
-        from uuid import UUID
-
         from app.services.audio import request_audio
 
         if not self.settings.telegram_tts_enabled:
             return "German audio generation is not enabled yet."
         parts = value.split(":", 1)
         try:
-            sentence_id = UUID(parts[0])
+            sentence_id = normalize_id(parts[0], expected_kind="sentence")
         except ValueError:
             return "Entry unavailable."
         if len(parts) != 2:
@@ -1157,12 +1192,10 @@ class Handlers:
         return "Replacement audio queued. The current recording remains available until the new audio is ready."
 
     async def play_audio(self, value):
-        from uuid import UUID
-
         from app.services.audio import playback_payload
 
         try:
-            asset_id = UUID(value)
+            asset_id = normalize_id(value, expected_kind="audio")
         except ValueError:
             return "Recording unavailable."
         payload = await playback_payload(self.session, self.incoming.actor_id, asset_id)
@@ -1172,14 +1205,12 @@ class Handlers:
         return "Playing recording."
 
     async def archive_retry(self, value):
-        from uuid import UUID
-
         from app.services.archive import retry_archive
 
         if not self.settings.telegram_archive_enabled:
             return "Archive storage is not enabled."
         try:
-            sentence_id = UUID(value)
+            sentence_id = normalize_id(value, expected_kind="sentence")
         except ValueError:
             return "Entry unavailable."
         if not await retry_archive(self.session, self.incoming.actor_id, sentence_id):
@@ -1270,13 +1301,11 @@ class Handlers:
         return "Random public entry opened."
 
     async def public_entry(self, value):
-        from uuid import UUID
-
         from app.db.models import AudioAsset, StoredMedia, Voice
         from app.services.discovery import public_sentence
 
         try:
-            sentence_id = UUID(value)
+            sentence_id = normalize_id(value, expected_kind="sentence")
         except ValueError:
             return "Entry unavailable."
         sentence = await public_sentence(self.session, sentence_id)
@@ -1310,12 +1339,10 @@ class Handlers:
         return "Public entry opened."
 
     async def copy_public_entry(self, value):
-        from uuid import UUID
-
         from app.services.discovery import copy_public_sentence
 
         try:
-            sentence_id = UUID(value)
+            sentence_id = normalize_id(value, expected_kind="sentence")
         except ValueError:
             return "Entry unavailable."
         copied = await copy_public_sentence(
@@ -1373,7 +1400,7 @@ class Handlers:
         for label, rating in (("Again", 1), ("Hard", 2), ("Good", 3), ("Easy", 4)):
             keyboard.add(InlineKeyboardButton(
                 label,
-                callback_data=f"grade:{review_session.id.hex}:{review_session.question_number}:{rating}",
+                callback_data=f"grade:{review_session.id}:{review_session.question_number}:{rating}",
             ))
         self.say(
             f"<b>{heading}</b>\n{escape(prompt)}"
@@ -1509,15 +1536,13 @@ class Handlers:
         return True
 
     async def grade_review_question(self, value):
-        from uuid import UUID
-
         from app.services.reviews import grade_question
 
         parts = value.split(":")
         if len(parts) != 3 or not parts[0].isalnum() or not parts[1].isdigit() or not parts[2].isdigit():
             return "Invalid review action."
         try:
-            session_id = UUID(hex=parts[0])
+            session_id = normalize_id(parts[0], expected_kind="review_session")
             question_number, rating = int(parts[1]), int(parts[2])
         except ValueError:
             return "Invalid review action."
@@ -1534,12 +1559,10 @@ class Handlers:
         return "This review question has expired."
 
     async def retry_activity(self, value):
-        from uuid import UUID
-
         from app.services.operations import retry_operation
 
         try:
-            operation = await retry_operation(self.session, UUID(value), self.incoming.actor_id)
+            operation = await retry_operation(self.session, normalize_id(value, expected_kind="operation"), self.incoming.actor_id)
         except ValueError:
             operation = None
         if operation is None:
@@ -1552,12 +1575,10 @@ class Handlers:
         return "Retry started."
 
     async def result_activity(self, value):
-        from uuid import UUID
-
         from app.db.models import Operation
 
         try:
-            operation = await self.session.get(Operation, UUID(value))
+            operation = await self.session.get(Operation, normalize_id(value, expected_kind="operation"))
         except ValueError:
             operation = None
         if (

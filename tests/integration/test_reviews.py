@@ -1,5 +1,5 @@
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
+from app.core.idgen import generate_id
 
 import pytest
 from sqlalchemy import func, select
@@ -41,7 +41,7 @@ def review_callback(user, data):
 
 
 async def test_translation_flashcard_escapes_html_and_grades_once(db, config):
-    user_id, sentence_id = 610, uuid4()
+    user_id, sentence_id = 610, generate_id()
     async with db.sessions.begin() as session:
         session.add(User(id=user_id, status="approved", private=True))
         await session.flush()
@@ -86,7 +86,7 @@ async def test_translation_flashcard_escapes_html_and_grades_once(db, config):
 
 
 async def test_text_edits_reset_affected_modes_and_preserve_attempt_history(db):
-    user_id, sentence_id, session_id = 620, uuid4(), uuid4()
+    user_id, sentence_id, session_id = 620, generate_id(), generate_id()
     reviewed_at = datetime(2026, 11, 8, 12, tzinfo=UTC)
     async with db.sessions.begin() as session:
         session.add(User(id=user_id, status="approved", private=True))
@@ -117,7 +117,7 @@ async def test_text_edits_reset_affected_modes_and_preserve_attempt_history(db):
         ))
         await session.flush()
         session.add(ReviewAttempt(
-            id=uuid4(), session_id=session_id, sentence_id=sentence_id, mode="de_to_en",
+            id=generate_id(), session_id=session_id, sentence_id=sentence_id, mode="de_to_en",
             question_number=1, sentence_revision=1, rating=3,
         ))
         await session.flush()
@@ -156,8 +156,8 @@ async def test_text_edits_reset_affected_modes_and_preserve_attempt_history(db):
 async def test_typed_audio_practice_reveals_and_records_answer(
     db, config, mode, typed_answer, prompt_text, expected_answer
 ):
-    user_id, sentence_id, asset_id = 630, uuid4(), uuid4()
-    media_id, voice_id = uuid4(), f"de_DE-test-{mode}"
+    user_id, sentence_id, asset_id = 630, generate_id(), generate_id()
+    media_id, voice_id = generate_id(), f"de_DE-test-{mode}"
     async with db.sessions.begin() as session:
         session.add(User(id=user_id, status="approved", private=True))
         await session.flush()
@@ -198,7 +198,7 @@ async def test_typed_audio_practice_reveals_and_records_answer(
         session_id = review_session.id
     await dispatch(
         db, config, transport,
-        review_callback(user_id, f"grade:{session_id.hex}:{question_number}:3"),
+        review_callback(user_id, f"grade:{session_id}:{question_number}:3"),
     )
     assert transport.sent[-1][1]["text"] == "This review question has expired."
 
@@ -211,7 +211,7 @@ async def test_typed_audio_practice_reveals_and_records_answer(
     ]
     await dispatch(
         db, config, transport,
-        review_callback(user_id, f"grade:{session_id.hex}:{question_number}:3"),
+        review_callback(user_id, f"grade:{session_id}:{question_number}:3"),
     )
     async with db.sessions() as session:
         attempt = await session.scalar(select(ReviewAttempt).where(ReviewAttempt.session_id == session_id))
@@ -242,7 +242,7 @@ async def test_admin_can_view_review_limits_before_registration(db, config):
 
 
 async def test_english_edit_resets_translation_and_listening_only(db, config):
-    user_id, sentence_id = 650, uuid4()
+    user_id, sentence_id = 650, generate_id()
     now = datetime(2026, 11, 8, 12, tzinfo=UTC)
     async with db.sessions.begin() as session:
         session.add(User(id=user_id, status="approved", private=True))
@@ -265,7 +265,7 @@ async def test_english_edit_resets_translation_and_listening_only(db, config):
             sentence_revision=1, step="english",
         ))
         session.add(ReviewSession(
-            id=uuid4(), user_id=user_id, mode="de_to_en", state="active",
+            id=generate_id(), user_id=user_id, mode="de_to_en", state="active",
             current_sentence_id=sentence_id, question_number=1, question_revision=1,
         ))
 
@@ -287,7 +287,7 @@ async def test_english_edit_resets_translation_and_listening_only(db, config):
 
 
 async def test_german_edit_worker_resets_all_modes_after_translation(db, config):
-    user_id, sentence_id = 660, uuid4()
+    user_id, sentence_id = 660, generate_id()
     now = datetime(2026, 11, 8, 12, tzinfo=UTC)
     async with db.sessions.begin() as session:
         session.add(User(id=user_id, status="approved", private=True))
@@ -326,7 +326,7 @@ async def test_english_to_german_flashcard_direction(db, config):
         session.add(User(id=user_id, status="approved", private=True))
         await session.flush()
         session.add(Sentence(
-            id=uuid4(), user_id=user_id, german="Ich lerne.", english="I am learning.",
+            id=generate_id(), user_id=user_id, german="Ich lerne.", english="I am learning.",
             normalized_german="Ich lerne.",
         ))
 
@@ -342,7 +342,7 @@ async def test_english_to_german_flashcard_direction(db, config):
 
 
 async def test_due_cards_precede_new_cards_and_session_limit_is_enforced(db):
-    user_id, due_id, new_id = 680, uuid4(), uuid4()
+    user_id, due_id, new_id = 680, generate_id(), generate_id()
     now = datetime(2026, 11, 8, 12, tzinfo=UTC)
     async with db.sessions.begin() as session:
         session.add(User(
@@ -386,7 +386,7 @@ async def test_active_review_question_resumes_with_same_fence(db, config):
         session.add(User(id=user_id, status="approved", private=True))
         await session.flush()
         session.add(Sentence(
-            id=uuid4(), user_id=user_id, german="Guten Abend.", english="Good evening.",
+            id=generate_id(), user_id=user_id, german="Guten Abend.", english="Good evening.",
             normalized_german="Guten Abend.",
         ))
 

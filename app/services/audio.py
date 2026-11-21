@@ -6,8 +6,8 @@ import re
 from contextlib import suppress
 from datetime import timedelta
 from html import escape
-from uuid import uuid4
 
+from app.core.idgen import format_id, generate_claim_token, generate_id
 import httpx
 from sqlalchemy import and_, func, or_, select, update
 
@@ -27,7 +27,7 @@ def clip_telegram_text(text, limit):
     return encoded[: (limit - 1) * 2].decode("utf-16-le", errors="ignore") + "…"
 
 
-def archive_audio_metadata(sentence, asset, voice):
+def archive_audio_metadata(sentence, asset, voice, user):
     name = voice_name(voice.id)
 
     def tag(value):
@@ -36,9 +36,9 @@ def archive_audio_metadata(sentence, asset, voice):
     fields = [
         ("Voice", f"{name} {tag(voice.id)}"),
         ("Provider", tag(voice.provider)),
-        ("Sentence", tag(f"sentence_{sentence.id.hex}")),
-        ("User", tag(f"user_{sentence.user_id}")),
-        ("Audio", tag(f"audio_{asset.id.hex}")),
+        ("Sentence", format_id("sentence", sentence.id)),
+        ("User", format_id("user", user.public_id)),
+        ("Audio", format_id("audio", asset.id)),
         ("Revision", tag(f"revision_{sentence.revision}")),
     ]
     attribution = next(
@@ -140,7 +140,7 @@ async def request_audio(
             staged.state = "generating"
             return staged
         staged = AudioAsset(
-            id=uuid4(), sentence_id=sentence.id, voice_id=voice_id, kind="generated",
+            id=generate_id(), sentence_id=sentence.id, voice_id=voice_id, kind="generated",
             state="generating", active=False, replacement=True,
         )
         session.add(staged)
@@ -149,7 +149,7 @@ async def request_audio(
         return staged
     if asset is None:
         asset = AudioAsset(
-            id=uuid4(),
+            id=generate_id(),
             sentence_id=sentence.id,
             voice_id=voice_id,
             kind="generated",
@@ -243,7 +243,7 @@ class AudioRunner:
             if job.state == "running" and job.step == "upload":
                 job.uncertain = True
                 logger.warning("tts_archive_result_uncertain", extra={"job_id": str(job.asset_id)})
-            job.state, job.claim_token = "running", uuid4()
+            job.state, job.claim_token = "running", generate_claim_token()
             job.attempts += 1
             job.target_chat_id = job.target_chat_id or self.settings.telegram_media_channel_id
             job.lease_until = func.now() + timedelta(seconds=60)
@@ -295,7 +295,7 @@ class AudioRunner:
                 job.generation += 1
             if receipt:
                 media = StoredMedia(
-                    id=uuid4(),
+                    id=generate_id(),
                     telegram_file_id=receipt.file_id,
                     archive_chat_id=job.target_chat_id,
                     archive_message_id=receipt.message_id,
@@ -418,7 +418,7 @@ class AudioRunner:
                         receipt = await self.transport.upload_audio(
                             job.target_chat_id,
                             audio,
-                            **archive_audio_metadata(sentence, asset, voice),
+                            **archive_audio_metadata(sentence, asset, voice, user),
                         )
                     if await self.finish(job, state="done", receipt=receipt):
                         with suppress(Exception):

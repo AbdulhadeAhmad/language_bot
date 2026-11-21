@@ -1,6 +1,6 @@
 import asyncio
 from datetime import timedelta
-from uuid import uuid4
+from app.core.idgen import generate_id
 
 from sqlalchemy import func, select, update
 
@@ -133,7 +133,7 @@ async def test_library_pagination_entry_callbacks_and_access_checks(db, config):
         for i in range(7):
             session.add(
                 Sentence(
-                    id=uuid4(),
+                    id=generate_id(),
                     user_id=11,
                     german=f"Satz {i}",
                     english=f"Sentence {i}",
@@ -178,7 +178,7 @@ async def test_library_pagination_entry_callbacks_and_access_checks(db, config):
 
 async def test_german_edit_translates_durably_and_revision_fences_audio(db, config):
     config.telegram_tts_enabled = True
-    sentence_id, asset_id = uuid4(), uuid4()
+    sentence_id, asset_id = generate_id(), generate_id()
     async with db.sessions.begin() as session:
         session.add_all([User(id=11, status="approved"), User(id=22, status="approved")])
         await session.flush()
@@ -242,7 +242,7 @@ async def test_german_edit_translates_durably_and_revision_fences_audio(db, conf
 
 
 async def test_stale_sentence_edit_result_cannot_overwrite_newer_revision(db, config):
-    sentence_id = uuid4()
+    sentence_id = generate_id()
     async with db.sessions.begin() as session:
         session.add(User(id=11, status="approved"))
         await session.flush()
@@ -261,7 +261,7 @@ async def test_stale_sentence_edit_result_cannot_overwrite_newer_revision(db, co
 
 
 async def test_entry_deletion_requires_confirmation_and_cleans_unshared_media(db, config):
-    sentence_id, copied_id, media_id, asset_id = uuid4(), uuid4(), uuid4(), uuid4()
+    sentence_id, copied_id, media_id, asset_id = generate_id(), generate_id(), generate_id(), generate_id()
     async with db.sessions.begin() as session:
         session.add(User(id=11, status="approved"))
         await session.flush()

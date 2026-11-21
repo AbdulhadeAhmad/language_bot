@@ -1,7 +1,7 @@
 import asyncio
 import wave
 from datetime import timedelta
-from uuid import uuid4
+from app.core.idgen import generate_id
 
 import httpx
 import pytest
@@ -35,7 +35,7 @@ def service(db, kind, tmp_path, monkeypatch):
 @pytest.mark.parametrize("kind", ["asr", "translation", "tts"])
 async def test_service_persistent_idempotent_jobs_and_cleanup(db, tmp_path, monkeypatch, kind):
     app = service(db, kind, tmp_path, monkeypatch)
-    job_id = uuid4()
+    job_id = generate_id()
     url = f"/jobs/{job_id}"
     kwargs = {"content": b"test audio"} if kind == "asr" else {"json": {"text": "Guten Morgen."}}
     async with httpx.AsyncClient(
@@ -68,10 +68,10 @@ async def test_queue_backpressure_and_validation(db, tmp_path, monkeypatch):
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://model"
     ) as client:
-        assert (await client.put(f"/jobs/{uuid4()}", json={"text": "hello"})).status_code == 202
-        assert (await client.put(f"/jobs/{uuid4()}", json={"text": "second"})).status_code == 429
-        assert (await client.put(f"/jobs/{uuid4()}", json={"text": " " * 5})).status_code == 422
-        assert (await client.put(f"/jobs/{uuid4()}", json={"text": "x" * 10001})).status_code == 422
+        assert (await client.put(f"/jobs/{generate_id()}", json={"text": "hello"})).status_code == 202
+        assert (await client.put(f"/jobs/{generate_id()}", json={"text": "second"})).status_code == 429
+        assert (await client.put(f"/jobs/{generate_id()}", json={"text": " " * 5})).status_code == 422
+        assert (await client.put(f"/jobs/{generate_id()}", json={"text": "x" * 10001})).status_code == 422
 
 
 async def test_model_lease_recovery_and_late_writer_fencing(db, tmp_path, monkeypatch):
@@ -80,7 +80,7 @@ async def test_model_lease_recovery_and_late_writer_fencing(db, tmp_path, monkey
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://model"
     ) as client:
-        await client.put(f"/jobs/{uuid4()}", content=b"audio")
+        await client.put(f"/jobs/{generate_id()}", content=b"audio")
     old = await queue.claim()
     assert await queue.claim() is None
     async with db.sessions.begin() as session:
@@ -107,7 +107,7 @@ async def test_cpu_work_does_not_block_model_api(db, tmp_path, monkeypatch):
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://model"
     ) as client:
-        job_id = uuid4()
+        job_id = generate_id()
         await client.put(f"/jobs/{job_id}", json={"text": "hello"})
         task = asyncio.create_task(app.state.queue.process_one())
         try:
@@ -160,7 +160,7 @@ async def test_bot_pipeline_through_real_http_contracts(db, config, tmp_path, mo
 
 async def test_cleanup_removes_expired_files_but_keeps_receipts(db, tmp_path, monkeypatch):
     app = service(db, "asr", tmp_path, monkeypatch)
-    job_id = uuid4()
+    job_id = generate_id()
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://model"
     ) as client:
@@ -183,11 +183,11 @@ async def test_asr_restart_reuses_result_without_redownloading_telegram_audio(
     db, config, tmp_path, monkeypatch
 ):
     from types import SimpleNamespace
-    from uuid import uuid5
+    from app.core.idgen import derive_id
 
     app = service(db, "asr", tmp_path, monkeypatch)
-    operation = SimpleNamespace(id=uuid4(), generation=0, source_file_id="unavailable")
-    job_id = uuid5(operation.id, "asr:0")
+    operation = SimpleNamespace(id=generate_id(), generation=0, source_file_id="unavailable")
+    job_id = derive_id("asr", operation.id, 0)
 
     class UnavailableTelegram:
         async def download(self, file_id):
@@ -217,7 +217,7 @@ async def test_transient_model_failure_retries_and_validation_failure_stops(
         return "translated", None
 
     app.state.queue.infer = transient
-    job_id = uuid4()
+    job_id = generate_id()
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://model"
     ) as client:
@@ -235,7 +235,7 @@ async def test_transient_model_failure_retries_and_validation_failure_stops(
             raise ValueError("InvalidInput")
 
         app.state.queue.infer = invalid
-        failed_id = uuid4()
+        failed_id = generate_id()
         await client.put(f"/jobs/{failed_id}", json={"text": "bad"})
         await app.state.queue.process_one()
         assert (await client.get(f"/jobs/{failed_id}")).json()["state"] == "failed"

@@ -1,8 +1,8 @@
 """Personal collections and advisory duplicate checks, scoped at the query boundary."""
 
 import unicodedata
-from uuid import uuid4
 
+from app.core.idgen import generate_id
 from sqlalchemy import or_, select
 
 from app.db.models import ArchiveJob, AudioAsset, Operation, Sentence, StoredMedia, User
@@ -73,7 +73,7 @@ async def save_capture(session, claimed, settings=None):
             await enqueue_missing_voice_audio(session, settings, sentence)
         return sentence
     sentence = Sentence(
-        id=uuid4(),
+        id=generate_id(),
         user_id=operation.user_id,
         capture_operation_id=operation.id,
         german=operation.german,
@@ -86,12 +86,12 @@ async def save_capture(session, claimed, settings=None):
     await session.flush()
     await ensure_review_cards(session, sentence)
     if operation.source_file_id:
-        media = StoredMedia(id=uuid4(), telegram_file_id=operation.source_file_id)
+        media = StoredMedia(id=generate_id(), telegram_file_id=operation.source_file_id)
         session.add(media)
         await session.flush()
         session.add(
             AudioAsset(
-                id=uuid4(),
+                id=generate_id(),
                 sentence_id=sentence.id,
                 stored_media_id=media.id,
                 kind="original",

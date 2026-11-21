@@ -4,8 +4,8 @@ import asyncio
 import logging
 from contextlib import suppress
 from datetime import timedelta
-from uuid import uuid4
 
+from app.core.idgen import generate_claim_token
 from sqlalchemy import and_, func, or_, select, update
 
 from app.bot.transport import RejectedDelivery, RetryAfter
@@ -115,7 +115,7 @@ class ArchiveRunner:
                 job.uncertain = True
                 logger.warning("archive_result_uncertain", extra={"media_id": str(job.media_id)})
             job.target_chat_id = job.target_chat_id or self.settings.telegram_media_channel_id
-            job.state, job.claim_token = "running", uuid4()
+            job.state, job.claim_token = "running", generate_claim_token()
             job.attempts += 1
             job.lease_until = func.now() + timedelta(seconds=60)
             await session.flush()

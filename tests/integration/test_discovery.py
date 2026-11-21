@@ -1,4 +1,4 @@
-from uuid import uuid4
+from app.core.idgen import generate_id
 
 from sqlalchemy import select
 
@@ -24,8 +24,8 @@ def callback(user, data, message_text=""):
 
 
 async def test_discovery_privacy_rechecks_and_copies_are_independent(db, config):
-    source_id, original_asset_id, generated_asset_id = uuid4(), uuid4(), uuid4()
-    original_media_id, generated_media_id = uuid4(), uuid4()
+    source_id, original_asset_id, generated_asset_id = generate_id(), generate_id(), generate_id()
+    original_media_id, generated_media_id = generate_id(), generate_id()
     async with db.sessions.begin() as session:
         session.add_all([
             User(id=11, status="approved", private=False),
@@ -45,7 +45,7 @@ async def test_discovery_privacy_rechecks_and_copies_are_independent(db, config)
         session.add_all([
             AudioAsset(id=original_asset_id, sentence_id=source_id, stored_media_id=original_media_id, kind="original", state="ready"),
             AudioAsset(id=generated_asset_id, sentence_id=source_id, stored_media_id=generated_media_id, kind="generated", voice_id="de_DE-thorsten-medium", state="ready"),
-            Sentence(id=uuid4(), user_id=11, german="Nicht sichtbar.", english="Private.", normalized_german="Nicht sichtbar."),
+            Sentence(id=generate_id(), user_id=11, german="Nicht sichtbar.", english="Private.", normalized_german="Nicht sichtbar."),
         ])
 
     async with db.sessions() as session:
@@ -103,7 +103,7 @@ async def test_public_search_paginates_and_rechecks_visibility(db, config):
         await session.flush()
         session.add_all([
             Sentence(
-                id=uuid4(),
+                id=generate_id(),
                 user_id=user_id,
                 german=f"Hallo Welt {index}",
                 english=f"Hello world {index}",
@@ -141,7 +141,7 @@ async def test_public_search_paginates_and_rechecks_visibility(db, config):
 
 
 async def test_repeated_copies_keep_immediate_provenance_and_shared_audio(db):
-    source_id, media_id = uuid4(), uuid4()
+    source_id, media_id = generate_id(), generate_id()
     async with db.sessions.begin() as session:
         session.add_all([
             User(id=410, status="approved", private=True),
@@ -164,7 +164,7 @@ async def test_repeated_copies_keep_immediate_provenance_and_shared_audio(db):
         ))
         await session.flush()
         session.add(AudioAsset(
-            id=uuid4(), sentence_id=source_id, stored_media_id=media_id,
+            id=generate_id(), sentence_id=source_id, stored_media_id=media_id,
             kind="generated", state="ready", voice_id="de_DE-thorsten-medium",
         ))
         await set_privacy(session, 410, private=False)
@@ -209,13 +209,13 @@ async def test_latest_and_random_only_show_public_entries(db, config):
         await session.flush()
         session.add_all([
             Sentence(
-                id=uuid4(), user_id=public_user,
+                id=generate_id(), user_id=public_user,
                 german=f"Öffentlich {index}", english=f"Public {index}",
                 normalized_german=f"Öffentlich {index}",
             )
             for index in range(6)
         ] + [Sentence(
-            id=uuid4(), user_id=private_user, german="Geheim.", english="Secret.",
+            id=generate_id(), user_id=private_user, german="Geheim.", english="Secret.",
             normalized_german="Geheim.",
         )])
 

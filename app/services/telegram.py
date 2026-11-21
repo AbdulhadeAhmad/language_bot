@@ -3,7 +3,6 @@
 import asyncio
 import logging
 from types import SimpleNamespace
-from uuid import UUID
 
 from sqlalchemy import select
 
@@ -82,7 +81,7 @@ async def handle_update(database, settings, transport, update):
                     user = await session.get(User, identity[0])
                     user.approval_notice_state = "uncertain"
                 elif key.startswith("operation:"):
-                    operation = await session.get(Operation, UUID(key.split(":")[1]))
+                    operation = await session.get(Operation, key.split(":")[1])
                     operation.state, operation.status_send_state = "failed", "uncertain"
                     operation.error_type = "StatusDeliveryUncertain"
             continue
@@ -93,7 +92,7 @@ async def handle_update(database, settings, transport, update):
                 )
                 user.approval_message_id, user.approval_notice_state = message_id, "sent"
             elif key.startswith("operation:"):
-                operation = await session.get(Operation, UUID(key.split(":")[1]))
+                operation = await session.get(Operation, key.split(":")[1])
                 operation.status_message_id = message_id
                 operation.status_send_state, operation.state = "sent", "pending"
     return "handled"

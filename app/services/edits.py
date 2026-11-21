@@ -5,8 +5,8 @@ import logging
 from contextlib import suppress
 from datetime import timedelta
 from types import SimpleNamespace
-from uuid import uuid4
 
+from app.core.idgen import generate_claim_token, generate_id
 from sqlalchemy import and_, func, or_, select
 
 from app.db.models import AudioAsset, AudioJob, Sentence, SentenceEditJob, User
@@ -38,7 +38,7 @@ class EditRunner:
             )
             if job is None:
                 return None
-            job.state, job.claim_token = "running", uuid4()
+            job.state, job.claim_token = "running", generate_claim_token()
             job.attempts += 1
             job.lease_until = func.now() + timedelta(seconds=LEASE_SECONDS)
             await session.flush()
@@ -119,7 +119,7 @@ class EditRunner:
                 await session.flush()
                 for voice_id in voices_to_regenerate:
                     replacement = AudioAsset(
-                        id=uuid4(), sentence_id=sentence.id, voice_id=voice_id,
+                        id=generate_id(), sentence_id=sentence.id, voice_id=voice_id,
                         kind="generated", state="generating",
                     )
                     session.add(replacement)
