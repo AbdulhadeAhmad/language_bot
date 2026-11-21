@@ -12,7 +12,13 @@ def parse_update(payload: dict) -> Update:
     return Update.de_json(payload)
 
 
-def actor(update: Update, settings) -> tuple[int, int] | None:
+def actor(update: Update, settings) -> tuple[int, int | None] | None:
+    inline_query = update.inline_query
+    if inline_query:
+        sender = inline_query.from_user
+        if sender and not sender.is_bot:
+            return sender.id, None
+        return None
     callback = update.callback_query
     message = callback.message if callback else update.message
     sender = callback.from_user if callback else (message.from_user if message else None)

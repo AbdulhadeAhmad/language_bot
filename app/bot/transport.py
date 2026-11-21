@@ -82,6 +82,9 @@ class BotTransport:
             if method == "answer_callback_query":
                 await self.bot.answer_callback_query(**payload)
                 return None
+            if method == "answer_inline_query":
+                await self.bot.answer_inline_query(**payload)
+                return None
             if method == "copy_message":
                 result = await self.bot.copy_message(**payload)
                 return result.message_id

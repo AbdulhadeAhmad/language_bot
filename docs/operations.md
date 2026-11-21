@@ -12,7 +12,7 @@ Daily reminders are opt-in. Set a local time and IANA timezone with `/reminders 
 
 ## Telegram home navigation
 
-Approved users receive a persistent home keyboard after `/start`: Library, Test, Discover, Settings, Activity, and Home. The section menus use inline buttons for sentence browsing, practice modes, public search/latest/random, privacy, review limits, reminders, and processing history/retries. Search, limits, reminder setup, and administrator access grants use Telegram reply prompts. The original slash commands remain available as shortcuts.
+Approved users receive a persistent home keyboard after `/start`: Library, Test, Discover, Settings, Activity, and Home. The section menus use inline buttons for sentence browsing, practice modes, public search/latest/random, privacy, review limits, reminders, and processing history/retries. Library search uses Telegram inline mode: Search German and Search English prefill `DU:` and `EN:`, and results are limited to the owner’s library, newest first. Selecting an article sends its `#ST_…` ID so the bot opens the sentence. Enable inline mode once through BotFather with `/setinline`, then refresh webhook update subscriptions with `python -m app.bot.webhook --current`. Search, limits, reminder setup, and administrator access grants use Telegram reply prompts. The original slash commands remain available as shortcuts.
 
 ## Original-recording archive (opt-in)
 

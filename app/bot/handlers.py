@@ -11,6 +11,8 @@ from telebot.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     ReplyKeyboardMarkup,
+    InlineQueryResultArticle,
+    InputTextMessageContent,
 )
 
 from app.db.models import AccessChange, InteractionState, Sentence, User
@@ -34,6 +36,7 @@ class Handlers:
         self.bot.register_message_handler(self.start, commands=["start"])
         self.bot.register_message_handler(self.admin, commands=["admin"])
         self.bot.register_callback_query_handler(self.callback, func=lambda _: True)
+        self.bot.register_inline_handler(self.inline_search, func=lambda _: True)
         self.bot.register_message_handler(
             self.other,
             func=lambda _: True,
@@ -82,9 +85,13 @@ class Handlers:
 
     def library_menu(self):
         keyboard = InlineKeyboardMarkup()
+        keyboard.row(
+            InlineKeyboardButton("Search German", switch_inline_query_current_chat="DU:"),
+            InlineKeyboardButton("Search English", switch_inline_query_current_chat="EN:"),
+        )
         keyboard.add(InlineKeyboardButton("Browse saved sentences", callback_data="library:0"))
         keyboard.add(InlineKeyboardButton("Add a sentence", callback_data="addsentence:0"))
-        self.say("<b>Library</b>\nBrowse and manage your saved sentences.", keyboard=keyboard, parse_mode="HTML")
+        self.say("<b>Library</b>\nSearch your saved sentences or browse the collection.", keyboard=keyboard, parse_mode="HTML")
 
     def test_menu(self):
         keyboard = InlineKeyboardMarkup()
@@ -151,6 +158,49 @@ class Handlers:
 
     def prompt(self, text, placeholder):
         self.say(text, keyboard=ForceReply(selective=True, input_field_placeholder=placeholder))
+
+    async def inline_search(self, inline_query):
+        query = (inline_query.query or "").strip()
+        upper = query.upper()
+        if upper.startswith("DU:"):
+            language, term = "de", query[3:].strip()
+        elif upper.startswith("EN:"):
+            language, term = "en", query[3:].strip()
+        else:
+            language, term = None, ""
+
+        results = []
+        user = await self.session.get(User, inline_query.from_user.id)
+        approved = inline_query.from_user.id == self.settings.admin_telegram_id or (
+            user is not None and user.status == "approved"
+        )
+        if approved and language and term:
+            from app.services.collections import search_library
+
+            rows = await search_library(self.session, inline_query.from_user.id, language, term)
+            for row in rows:
+                german = " ".join(row.german.split())
+                english = " ".join(row.english.split())
+                results.append(
+                    InlineQueryResultArticle(
+                        id=row.id,
+                        title=german[:256],
+                        description=english[:256],
+                        input_message_content=InputTextMessageContent(
+                            message_text=format_id("sentence", row.id)
+                        ),
+                    )
+                )
+        self.emit(
+            "inline_answer",
+            "answer_inline_query",
+            {
+                "inline_query_id": inline_query.id,
+                "results": results,
+                "cache_time": 0,
+                "is_personal": True,
+            },
+        )
 
     async def resolve_typed_id(self, kind, body):
         if kind == "sentence":
@@ -843,17 +893,31 @@ class Handlers:
         page = int(value)
         rows = await list_sentences(self.session, self.incoming.actor_id, page)
         if not rows:
-            text = "No saved entries on this page. Send German text or a voice recording to add one."
+            text = "No saved entries on this page. Search your library or send German text/a voice recording to add one."
+            keyboard = InlineKeyboardMarkup()
+            keyboard.row(
+                InlineKeyboardButton("Search German", switch_inline_query_current_chat="DU:"),
+                InlineKeyboardButton("Search English", switch_inline_query_current_chat="EN:"),
+            )
             if message is None:
-                self.say(text)
+                self.say(text, keyboard=keyboard)
             else:
                 self.emit(
                     "library_page",
                     "edit_message_text",
-                    {"chat_id": message.chat.id, "message_id": message.message_id, "text": text},
+                    {
+                        "chat_id": message.chat.id,
+                        "message_id": message.message_id,
+                        "text": text,
+                        "reply_markup": keyboard.to_dict(),
+                    },
                 )
             return "No entries."
         keyboard = InlineKeyboardMarkup()
+        keyboard.row(
+            InlineKeyboardButton("Search German", switch_inline_query_current_chat="DU:"),
+            InlineKeyboardButton("Search English", switch_inline_query_current_chat="EN:"),
+        )
         for row in rows[:5]:
             label = " ".join(row.german.split())[:60]
             keyboard.add(InlineKeyboardButton(label, callback_data=f"entry:{row.id}"))

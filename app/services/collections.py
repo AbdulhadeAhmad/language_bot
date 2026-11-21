@@ -48,6 +48,23 @@ async def list_sentences(session, user_id, page=0, page_size=5):
     ).all()
 
 
+async def search_library(session, user_id, language, query, *, limit=20):
+    """Search one owner's library with a bounded substring query, newest first."""
+    column = {"de": Sentence.german, "en": Sentence.english}.get(language)
+    term = " ".join(query.split())[:100]
+    if column is None or not term:
+        return []
+    escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return (
+        await session.scalars(
+            select(Sentence)
+            .where(Sentence.user_id == user_id, column.ilike(f"%{escaped}%", escape="\\"))
+            .order_by(Sentence.created_at.desc(), Sentence.id.desc())
+            .limit(limit)
+        )
+    ).all()
+
+
 async def save_capture(session, claimed, settings=None):
     # Serialize against lease recovery and completion retries before creating any entry.
     operation = await session.scalar(
