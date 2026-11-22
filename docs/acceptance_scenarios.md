@@ -25,7 +25,7 @@ These scenarios translate `implementation_plan.md` into observable outcomes. The
 | A19 | M7 | Alice makes her collection private after Bob saved a copy. | Source disappears from discovery and old source callbacks stop working. Bob's existing copy remains usable under Bob's settings. |
 | A20 | M7 | Alice deletes the source. | Bob's copies and shared generated media survive; their source foreign keys become null. |
 | A21 | M7 | A copy is itself copied. | The new copy references the immediate source, not a guessed root ancestor. Provenance never bypasses privacy. |
-| A22 | M8 | Start either translation direction. | Prompt and spoiler-hidden translation arrive together with Again/Hard/Good/Easy buttons. No typed answer or reveal callback is required. |
+| A22 | M8 | Start a translation review or submit an answer in a typed-audio review. | The review question shows Again/Hard/Okay/Good/Easy buttons. Okay and Good both map to FSRS Good; translation reviews need no typed answer or reveal callback. |
 | A23 | M8 | Review text contains `<`, `>`, and `&`. | Text is escaped correctly; only the answer is spoiler-hidden. |
 | A24 | M8 | Submit a grade twice or press an old question's button. | A review is applied once, to the correct user, sentence, mode, and question. |
 | A25 | M8 | Review one of two identical sentences in one mode. | Only that sentence/mode's FSRS card changes. |

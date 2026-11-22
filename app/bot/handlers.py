@@ -2,7 +2,6 @@ import json
 from datetime import UTC, datetime
 from html import escape
 
-from app.core.idgen import find_typed_ids, format_id, generate_id, normalize_id
 from sqlalchemy import case, delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from telebot.async_telebot import AsyncTeleBot
@@ -15,8 +14,11 @@ from telebot.types import (
     ReplyKeyboardMarkup,
 )
 
+from app.core.idgen import find_typed_ids, format_id, generate_id, normalize_id
 from app.db.models import AccessChange, InteractionState, Sentence, User
 from app.voice_catalog import voice_name as display_voice_name
+
+REVIEW_RATINGS = (("Again", 1), ("Hard", 2), ("Okay", 3), ("Good", 4), ("Easy", 5))
 
 
 class PropagateErrors:
@@ -503,7 +505,7 @@ class Handlers:
                 elif command == "copy":
                     answer = await self.copy_public_entry(value)
                 elif command == "grade":
-                    answer = await self.grade_review_question(value)
+                    answer = await self.grade_review_question(value, callback.message)
                 else:
                     answer = await self.archive_retry(value)
             self.emit(
@@ -1462,6 +1464,30 @@ class Handlers:
 
         mode = review_session.mode
         if mode == "de_to_en":
+            # Give German → English practice a short batch, with one editable
+            # Telegram message per card so each rating can be confirmed inline.
+            if isinstance(sentence, list):
+                user = await self.session.get(User, self.incoming.actor_id)
+                total = user.review_session_limit if user else review_session.question_number
+                for question_number, item in sentence:
+                    text = (
+                        f"<b>German → English · {question_number}/{total}</b>\n"
+                        f"{escape(item.german)}\n\n"
+                        f"<span class=\"tg-spoiler\">{escape(item.english)}</span>"
+                    )
+                    keyboard = InlineKeyboardMarkup()
+                    for label, rating in REVIEW_RATINGS:
+                        keyboard.add(InlineKeyboardButton(
+                            label,
+                            callback_data=f"grade:{review_session.id}:{question_number}:{rating}",
+                        ))
+                    self.say(
+                        text,
+                        key=f"review:{review_session.id}:{question_number}",
+                        keyboard=keyboard,
+                        parse_mode="HTML",
+                    )
+                return True
             heading, prompt, answer = "German → English", sentence.german, sentence.english
         elif mode == "en_to_de":
             heading, prompt, answer = "English → German", sentence.english, sentence.german
@@ -1494,7 +1520,7 @@ class Handlers:
         else:
             return False
         keyboard = InlineKeyboardMarkup()
-        for label, rating in (("Again", 1), ("Hard", 2), ("Good", 3), ("Easy", 4)):
+        for label, rating in REVIEW_RATINGS:
             keyboard.add(InlineKeyboardButton(
                 label,
                 callback_data=f"grade:{review_session.id}:{review_session.question_number}:{rating}",
@@ -1632,7 +1658,7 @@ class Handlers:
         await self.review_question(*result)
         return True
 
-    async def grade_review_question(self, value):
+    async def grade_review_question(self, value, message=None):
         from app.services.reviews import grade_question
 
         parts = value.split(":")
@@ -1646,6 +1672,37 @@ class Handlers:
         result, status = await grade_question(
             self.session, self.incoming.actor_id, session_id, question_number, rating
         )
+        if status in {"batch_graded", "batch_next", "batch_complete"}:
+            from app.db.models import ReviewSession
+
+            sentence = result["sentence"]
+            user = await self.session.get(User, self.incoming.actor_id)
+            total = user.review_session_limit if user else question_number
+            rating_name = dict((value, label) for label, value in REVIEW_RATINGS)[rating]
+            text = (
+                f"<b>German → English · {question_number}/{total}</b>\n"
+                f"{escape(sentence.german)}\n\n"
+                f"<span class=\"tg-spoiler\">{escape(sentence.english)}</span>\n\n"
+                f"✅ <b>{rating_name}</b>\n{format_id('sentence', sentence.id)}"
+            )
+            if message is not None:
+                self.emit(
+                    f"review-confirm:{session_id}:{question_number}",
+                    "edit_message_text",
+                    {
+                        "chat_id": message.chat.id,
+                        "message_id": message.message_id,
+                        "text": text,
+                        "parse_mode": "HTML",
+                        "reply_markup": {"inline_keyboard": []},
+                    },
+                )
+            if status == "batch_next":
+                review_session = await self.session.get(ReviewSession, session_id)
+                await self.review_question(review_session, result["next_batch"])
+            elif status == "batch_complete":
+                self.say("Practice complete. Great work!")
+            return f"{rating_name} recorded."
         if status == "graded":
             review_session, sentence = result
             await self.review_question(review_session, sentence)

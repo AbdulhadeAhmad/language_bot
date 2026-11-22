@@ -287,11 +287,31 @@ class ReviewSession(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class ReviewBatchQuestion(Base):
+    __tablename__ = "review_batch_questions"
+    __table_args__ = (
+        CheckConstraint("state IN ('pending','graded','cancelled')", name="review_batch_question_state"),
+        CheckConstraint("rating IS NULL OR rating BETWEEN 1 AND 5", name="review_batch_question_rating"),
+        Index("ix_review_batch_questions_pending", "session_id", "state", "question_number"),
+    )
+    session_id: Mapped[str] = mapped_column(
+        String(8), ForeignKey("review_sessions.id", ondelete="CASCADE"), primary_key=True
+    )
+    question_number: Mapped[int] = mapped_column(Integer, primary_key=True)
+    sentence_id: Mapped[str] = mapped_column(
+        String(8), ForeignKey("sentences.id", ondelete="CASCADE")
+    )
+    sentence_revision: Mapped[int] = mapped_column(Integer)
+    state: Mapped[str] = mapped_column(String(16), server_default="pending")
+    rating: Mapped[int | None] = mapped_column(SmallInteger)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class ReviewAttempt(Base):
     __tablename__ = "review_attempts"
     __table_args__ = (
         CheckConstraint("mode IN ('de_to_en','en_to_de','dictation','listening')", name="review_attempt_mode"),
-        CheckConstraint("rating BETWEEN 1 AND 4", name="review_attempt_rating"),
+        CheckConstraint("rating BETWEEN 1 AND 5", name="review_attempt_rating"),
         UniqueConstraint("session_id", "question_number", name="uq_review_attempt_question"),
         Index("ix_review_attempts_sentence", "sentence_id", "mode", "reviewed_at"),
     )

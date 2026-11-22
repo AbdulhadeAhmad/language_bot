@@ -1,9 +1,9 @@
 from datetime import UTC, datetime, timedelta
-from app.core.idgen import generate_id
 
 import pytest
 from sqlalchemy import func, select
 
+from app.core.idgen import generate_id
 from app.db.models import (
     AudioAsset,
     InteractionState,
@@ -58,11 +58,13 @@ async def test_translation_flashcard_escapes_html_and_grades_once(db, config):
     question = transport.sent[-1][1]
     assert question["parse_mode"] == "HTML"
     assert question["text"] == (
-        "<b>German → English</b>\n&lt;Morgen &amp; Co&gt;\n\n"
+        "<b>German → English · 1/20</b>\n&lt;Morgen &amp; Co&gt;\n\n"
         '<span class="tg-spoiler">Good &lt;morning&gt; &amp; you</span>'
     )
     buttons = question["reply_markup"]["inline_keyboard"]
-    assert [row[0]["text"] for row in buttons] == ["Again", "Hard", "Good", "Easy"]
+    assert [row[0]["text"] for row in buttons] == [
+        "Again", "Hard", "Okay", "Good", "Easy"
+    ]
     callback_data = buttons[2][0]["callback_data"]
     await dispatch(db, config, transport, review_callback(user_id, callback_data))
 
@@ -207,7 +209,7 @@ async def test_typed_audio_practice_reveals_and_records_answer(
     assert f"Your answer: {typed_answer}" in revealed["text"]
     assert f'<span class="tg-spoiler">{expected_answer}</span>' in revealed["text"]
     assert [row[0]["text"] for row in revealed["reply_markup"]["inline_keyboard"]] == [
-        "Again", "Hard", "Good", "Easy"
+        "Again", "Hard", "Okay", "Good", "Easy"
     ]
     await dispatch(
         db, config, transport,

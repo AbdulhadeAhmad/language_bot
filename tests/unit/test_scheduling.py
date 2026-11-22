@@ -5,14 +5,16 @@ import pytest
 from app.services.scheduling import DESIRED_RETENTION, new_card, review_card
 
 
-@pytest.mark.parametrize("rating", [1, 2, 3, 4])
-def test_fsrs_adapter_round_trips_each_grade(rating):
+@pytest.mark.parametrize(
+    ("rating", "fsrs_rating"), [(1, 1), (2, 2), (3, 3), (4, 3), (5, 4)]
+)
+def test_fsrs_adapter_maps_five_choices_to_four_grades(rating, fsrs_rating):
     now = datetime(2026, 11, 8, 12, tzinfo=timezone.utc)
     initial = new_card(now)
 
     updated, review_log = review_card(initial, rating, now)
 
-    assert review_log["rating"] == rating
+    assert review_log["rating"] == fsrs_rating
     assert updated["last_review"] == now.isoformat()
     assert datetime.fromisoformat(updated["due"]) >= now
     assert DESIRED_RETENTION == 0.9
@@ -27,7 +29,7 @@ def test_fsrs_adapter_accepts_other_timezones_and_normalizes_output():
     assert review_log["review_datetime"] == "2026-11-08T12:00:00+00:00"
 
 
-@pytest.mark.parametrize("rating", [0, 5, True, "3"])
+@pytest.mark.parametrize("rating", [0, 6, True, "3"])
 def test_fsrs_adapter_rejects_invalid_grades(rating):
     now = datetime(2026, 11, 8, 12, tzinfo=timezone.utc)
 

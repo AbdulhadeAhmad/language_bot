@@ -12,7 +12,8 @@ _RATINGS = {
     1: Rating.Again,
     2: Rating.Hard,
     3: Rating.Good,
-    4: Rating.Easy,
+    4: Rating.Good,
+    5: Rating.Easy,
 }
 REVIEW_MODES = ("de_to_en", "en_to_de", "dictation", "listening")
 
@@ -31,7 +32,7 @@ def new_card(now: datetime) -> dict:
 def review_card(card_state: dict, rating: int, now: datetime) -> tuple[dict, dict]:
     """Apply one self-grade and return JSON-safe card and review-log snapshots."""
     if type(rating) is not int or rating not in _RATINGS:
-        raise ValueError("Rating must be an integer from 1 through 4")
+        raise ValueError("Rating must be an integer from 1 through 5")
     card = Card.from_dict(card_state)
     updated, log = Scheduler(desired_retention=DESIRED_RETENTION).review_card(
         card,
