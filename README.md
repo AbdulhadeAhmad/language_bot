@@ -10,6 +10,12 @@ The bot supports approved-user registration, German voice/text capture, private 
   <sub>Short on time? The demo opens right in GitHub's video viewer.</sub>
 </div>
 
+
+
+https://github.com/user-attachments/assets/ceb22689-c852-478e-b240-b7e9a8d8dfdb
+
+
+
 - [Setup, deployment, admin workflow, external storage, and migration](docs/operations.md)
 - [Acceptance scenarios](docs/acceptance_scenarios.md)
 - [Model benchmarks](benchmarks/README.md)
